@@ -37,6 +37,83 @@ FALLBACK_PRICING = {
     "ri:1yr-partial": 0.46,
 }
 
+# Explicit check ID to calculator mapping (fixes routing bug)
+# Each check ID is explicitly mapped to avoid prefix-matching errors
+CHECK_ID_ROUTING = {
+    # EC2 Idle/Terminate checks -> full monthly cost savings
+    "EC2-001": "ec2",      # Idle EC2 Instance
+    "EC2-002": "ec2",      # Stopped Instance (still incurs EBS cost)
+    "EC2-004": "ec2",      # Low utilization
+
+    # EC2 Optimization checks -> partial savings (10-30%)
+    "EC2-003": "ec2",      # Previous Generation (10% savings)
+    "EC2-005": "ec2",      # Over-provisioned (30% savings)
+    "EC2-007": "ec2",      # Graviton migration (20% savings)
+
+    # EBS checks
+    "EC2-006": "ebs",      # GP2 to GP3 migration
+    "EC2-011": "ebs",      # Over-provisioned IOPS
+    "EC2-012": "ebs",      # Unattached EBS Volumes
+    "EC2-013": "ebs",      # Oversized volumes
+    "EBS-001": "ebs",      # Unattached Volumes (duplicate of EC2-012)
+    "EBS-002": "ebs",      # GP2 to GP3 (duplicate of EC2-006)
+    "EBS-003": "ebs",      # Over-provisioned IOPS
+    "EBS-004": "ebs",      # Old snapshots
+    "EBS-005": "ebs",      # Oversized volumes
+    "EBS-006": "ebs",      # Unencrypted volumes
+
+    # RDS checks
+    "RDS-001": "rds",      # Idle RDS
+    "RDS-002": "rds",      # Over-provisioned RDS
+    "RDS-003": "rds",      # Multi-AZ without need
+    "RDS-004": "rds",      # Previous generation
+    "RDS-005": "rds",      # No RI coverage
+    "RDS-006": "rds",      # Extended Support
+    "RDS-007": "rds",      # Old snapshots
+    "RDS-008": "rds",      # Aurora capacity
+
+    # ElastiCache checks
+    "CACHE-001": "elasticache",
+    "CACHE-002": "elasticache",
+    "CACHE-003": "elasticache",
+
+    # CloudWatch/Logs checks
+    "LOG-001": "cloudwatch",   # CloudWatch Logs retention
+    "LOG-002": "cloudwatch",   # Excessive log groups
+
+    # Lambda checks
+    "LAMBDA-001": "lambda",    # Over-provisioned memory
+    "LAMBDA-002": "lambda",    # Unused functions
+    "LAMBDA-003": "lambda",    # No ARM64
+    "LAMBDA-004": "lambda",    # Old runtimes
+    "LAMBDA-005": "lambda",    # No provisioned concurrency
+
+    # S3 checks
+    "S3-001": "s3",           # No lifecycle policy
+    "S3-002": "s3",           # No Intelligent-Tiering
+    "S3-003": "s3",           # Incomplete multipart uploads
+    "S3-004": "s3",           # No versioning cleanup
+    "S3-005": "s3",           # Excessive versioning
+
+    # Networking checks (use original estimate)
+    "NET-001": "network",     # Unused Elastic IPs
+    "NET-002": "network",     # NAT Gateway optimization
+    "NET-003": "network",     # VPC Endpoints missing
+    "NET-004": "network",     # Cross-AZ data transfer
+}
+
+# Map service domain to Cost Explorer service name
+DOMAIN_TO_CE_SERVICE = {
+    "ec2": "Amazon Elastic Compute Cloud - Compute",
+    "ebs": "Amazon Elastic Compute Cloud - Compute",  # EBS is part of EC2 billing
+    "rds": "Amazon Relational Database Service",
+    "elasticache": "Amazon ElastiCache",
+    "cloudwatch": "AmazonCloudWatch",
+    "lambda": "AWS Lambda",
+    "s3": "Amazon Simple Storage Service",
+    "network": "Amazon Elastic Compute Cloud - Compute",
+}
+
 
 def run_aws_command(command: str, profile: str) -> dict | None:
     """Execute AWS CLI command and return JSON response."""
@@ -173,6 +250,88 @@ def parse_pricing_response(response: dict | None) -> float | None:
 def get_fallback_price(key: str, default: float = 0.0) -> float:
     """Get fallback price for small findings."""
     return FALLBACK_PRICING.get(key, default)
+
+
+def get_service_monthly_spend(service_domain: str, profile: str) -> float | None:
+    """Query Cost Explorer for actual monthly spend on a service.
+
+    This is the MANDATORY sanity check: findings cannot save more than service costs.
+    """
+    ce_service = DOMAIN_TO_CE_SERVICE.get(service_domain)
+    if not ce_service:
+        return None
+
+    # Get last month's actual spend
+    from datetime import timedelta
+    now = datetime.now(timezone.utc)
+    start_of_month = now.replace(day=1)
+    end_of_last_month = start_of_month - timedelta(days=1)
+    start_of_last_month = end_of_last_month.replace(day=1)
+
+    start_date = start_of_last_month.strftime("%Y-%m-%d")
+    end_date = start_of_month.strftime("%Y-%m-%d")
+
+    cmd = f'''aws ce get-cost-and-usage \
+        --time-period Start={start_date},End={end_date} \
+        --granularity MONTHLY \
+        --metrics UnblendedCost \
+        --filter '{{"Dimensions": {{"Key": "SERVICE", "Values": ["{ce_service}"]}}}}' '''
+
+    result = run_aws_command(cmd, profile)
+    if not result:
+        return None
+
+    try:
+        results_by_time = result.get("ResultsByTime", [])
+        if results_by_time:
+            total = results_by_time[0].get("Total", {})
+            cost = total.get("UnblendedCost", {}).get("Amount")
+            if cost:
+                return float(cost)
+    except (KeyError, ValueError, TypeError):
+        pass
+
+    return None
+
+
+def sanity_check_finding(finding: dict, profile: str, service_spend_cache: dict) -> dict:
+    """MANDATORY: Validate that finding savings don't exceed service spend.
+
+    Per CLAUDE.md: finding.monthly_savings <= service.monthly_spend
+    If validation fails, cap savings and mark as corrected.
+    """
+    check_id = finding.get("check_id", "")
+    monthly_savings = finding.get("monthly_savings", 0)
+
+    # Get service domain from check ID routing
+    service_domain = CHECK_ID_ROUTING.get(check_id)
+    if not service_domain:
+        return finding  # Unknown check, skip sanity check
+
+    # Cache service spend queries (expensive API call)
+    if service_domain not in service_spend_cache:
+        print(f"  Querying Cost Explorer for {service_domain} spend...")
+        service_spend_cache[service_domain] = get_service_monthly_spend(service_domain, profile)
+
+    service_spend = service_spend_cache.get(service_domain)
+
+    # SANITY CHECK: savings cannot exceed service spend
+    if service_spend is not None and monthly_savings > service_spend:
+        original_savings = monthly_savings
+        # Cap at 80% of service spend (leaving room for baseline usage)
+        capped_savings = round(service_spend * 0.8, 2)
+
+        finding["monthly_savings"] = capped_savings
+        finding["pricing_corrected"] = True
+        finding["sanity_check"] = {
+            "original_savings": original_savings,
+            "service_spend": round(service_spend, 2),
+            "capped_to": capped_savings,
+            "reason": f"Savings ${original_savings:.2f} exceeded service spend ${service_spend:.2f}"
+        }
+        print(f"  ⚠️  {check_id}: Capped ${original_savings:.2f} -> ${capped_savings:.2f} (service spend: ${service_spend:.2f})")
+
+    return finding
 
 
 def calculate_ec2_savings(finding: dict, profile: str, use_api: bool = False) -> tuple[float, dict]:
@@ -348,13 +507,39 @@ def calculate_lambda_savings(finding: dict, profile: str, use_api: bool = False)
 def calculate_s3_savings(finding: dict, profile: str, use_api: bool = False) -> tuple[float, dict]:
     """Calculate savings for S3 findings."""
     # S3 lifecycle/versioning savings are estimates based on bucket analysis
+    return finding.get("monthly_savings", 0), {"source": "original estimate", "needs_manual_review": True}
+
+
+def calculate_network_savings(finding: dict, profile: str, use_api: bool = False) -> tuple[float, dict]:
+    """Calculate savings for networking findings (EIPs, NAT, etc.)."""
+    check_id = finding.get("check_id", "")
+
+    # NET-001: Unused Elastic IP - fixed cost $3.60/month
+    if check_id == "NET-001":
+        return 3.60, {"source": "fixed rate", "calculation": "$0.005/hour * 730 hours"}
+
+    # Other network findings use original estimate
     return finding.get("monthly_savings", 0), {"source": "original estimate"}
+
+
+# Calculator dispatch table (maps service domain to calculator function)
+CALCULATOR_DISPATCH = {
+    "ec2": calculate_ec2_savings,
+    "ebs": calculate_ebs_savings,
+    "rds": calculate_rds_savings,
+    "elasticache": calculate_elasticache_savings,
+    "cloudwatch": calculate_cloudwatch_savings,
+    "lambda": calculate_lambda_savings,
+    "s3": calculate_s3_savings,
+    "network": calculate_network_savings,
+}
 
 
 def correct_finding(finding: dict, profile: str, threshold: float = 100) -> dict:
     """Correct a single finding with accurate pricing.
 
     Only queries AWS Pricing API for findings with savings > threshold.
+    Uses explicit check ID routing (not prefix matching) to avoid misrouting bugs.
     """
     check_id = finding.get("check_id", "")
     original_savings = finding.get("monthly_savings", 0)
@@ -362,25 +547,17 @@ def correct_finding(finding: dict, profile: str, threshold: float = 100) -> dict
     # Only use real API for big findings (> threshold)
     use_api = original_savings > threshold
 
-    # Route to appropriate calculator
-    if check_id.startswith("EC2-001") or check_id.startswith("EC2-00"):
-        savings, metadata = calculate_ec2_savings(finding, profile, use_api)
-    elif check_id.startswith("EC2-012") or check_id.startswith("EBS"):
-        savings, metadata = calculate_ebs_savings(finding, profile, use_api)
-    elif check_id.startswith("RDS"):
-        savings, metadata = calculate_rds_savings(finding, profile, use_api)
-    elif check_id.startswith("CACHE"):
-        savings, metadata = calculate_elasticache_savings(finding, profile, use_api)
-    elif check_id.startswith("SEC-001") or check_id.startswith("LOG"):
-        savings, metadata = calculate_cloudwatch_savings(finding, profile, use_api)
-    elif check_id.startswith("LAMBDA"):
-        savings, metadata = calculate_lambda_savings(finding, profile, use_api)
-    elif check_id.startswith("S3"):
-        savings, metadata = calculate_s3_savings(finding, profile, use_api)
+    # Route to appropriate calculator using EXPLICIT check ID mapping
+    # This fixes the bug where startswith("EC2-00") matched EC2-001 through EC2-009
+    service_domain = CHECK_ID_ROUTING.get(check_id)
+
+    if service_domain and service_domain in CALCULATOR_DISPATCH:
+        calculator = CALCULATOR_DISPATCH[service_domain]
+        savings, metadata = calculator(finding, profile, use_api)
     else:
-        # Keep original for unknown types
+        # Unknown check ID - keep original but flag for review
         savings = original_savings
-        metadata = {"source": "original estimate"}
+        metadata = {"source": "original estimate", "warning": f"Unknown check_id: {check_id}"}
 
     # Update finding
     finding["monthly_savings"] = savings
@@ -399,6 +576,8 @@ def correct_findings(findings_path: str, profile: str, threshold: float = 100) -
 
     Only queries AWS Pricing API for findings with savings > threshold.
     Smaller findings use fallback estimates.
+
+    MANDATORY: Also performs sanity check (savings <= service spend).
     """
     try:
         with open(findings_path) as f:
@@ -423,17 +602,28 @@ def correct_findings(findings_path: str, profile: str, threshold: float = 100) -
     if big_findings:
         print(f"Will query AWS Pricing API for {len(big_findings)} finding(s)...\n")
 
+    # Cache for service spend (avoid repeated Cost Explorer queries)
+    service_spend_cache = {}
+
     # Correct each finding
     corrected_findings = []
     total_original = 0
     total_corrected = 0
     api_validated_count = 0
+    sanity_check_corrections = 0
 
     for finding in findings:
         original = finding.get("monthly_savings", 0)
         total_original += original
 
+        # Step 1: Price correction
         corrected = correct_finding(finding.copy(), profile, threshold)
+
+        # Step 2: MANDATORY sanity check (savings <= service spend)
+        corrected = sanity_check_finding(corrected, profile, service_spend_cache)
+        if corrected.get("pricing_corrected"):
+            sanity_check_corrections += 1
+
         corrected_findings.append(corrected)
         total_corrected += corrected.get("monthly_savings", 0)
 
@@ -447,6 +637,8 @@ def correct_findings(findings_path: str, profile: str, threshold: float = 100) -
         "validation_threshold": threshold,
         "api_validated_count": api_validated_count,
         "fallback_estimate_count": len(findings) - api_validated_count,
+        "sanity_check_corrections": sanity_check_corrections,
+        "service_spend_cache": {k: round(v, 2) if v else None for k, v in service_spend_cache.items()},
         "original_total": round(total_original, 2),
         "corrected_total": round(total_corrected, 2),
         "findings_processed": len(corrected_findings)
