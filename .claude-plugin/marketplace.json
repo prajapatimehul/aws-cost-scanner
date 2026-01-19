@@ -1,12 +1,25 @@
 {
-  "name": "aws-cost-scanner",
-  "description": "AWS Cost Optimization Plugin Marketplace",
+  "name": "aws-cost-scanner-marketplace",
+  "owner": {
+    "name": "Mehul Prajapati",
+    "email": "mehul@example.com"
+  },
+  "metadata": {
+    "description": "AWS Cost Optimization plugins for Claude Code",
+    "version": "1.0.0"
+  },
   "plugins": [
     {
       "name": "aws-cost-scanner",
-      "version": "1.0.0",
       "description": "97 automated AWS cost optimization checks across 6 domains with parallel scanning and confidence-based filtering",
-      "source": "."
+      "version": "1.0.0",
+      "author": {
+        "name": "Mehul Prajapati"
+      },
+      "source": ".",
+      "category": "infrastructure",
+      "tags": ["aws", "cost-optimization", "cloud", "finops"],
+      "keywords": ["aws", "cost", "optimization", "cloud", "finops", "savings"]
     }
   ]
 }
