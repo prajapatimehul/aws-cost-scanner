@@ -120,32 +120,31 @@ python main.py report --findings findings.json
 ```
 aws-cost-optimizer/
 ├── .claude-plugin/
-│   └── plugin.json              # Plugin metadata
-├── agents/
-│   └── aws-cost-scanner.md      # Subagent for parallel domain scanning
-├── commands/
-│   └── scan.md                  # /scan workflow (7 steps)
-├── skills/
-│   ├── reviewing-findings/
-│   │   ├── reviewing-findings.md    # Skill definition
-│   │   ├── REVIEW_CRITERIA.md
-│   │   └── scripts/
-│   │       └── review_findings.py
-│   └── validating-aws-pricing/
-│       ├── validating-aws-pricing.md  # Skill definition
-│       ├── PRICING_REFERENCE.md
-│       └── scripts/
-│           └── validate_pricing.py
+│   └── marketplace.json         # Plugin marketplace definition
+├── plugins/
+│   └── aws-cost-scanner/        # The plugin
+│       ├── plugin.json          # Plugin metadata
+│       ├── .mcp.json            # MCP server configuration (AWS API)
+│       ├── agents/
+│       │   └── aws-cost-scanner.md
+│       ├── commands/
+│       │   └── scan.md
+│       └── skills/
+│           ├── reviewing-findings/
+│           │   ├── reviewing-findings.md
+│           │   ├── REVIEW_CRITERIA.md
+│           │   └── scripts/review_findings.py
+│           └── validating-aws-pricing/
+│               ├── validating-aws-pricing.md
+│               ├── PRICING_REFERENCE.md
+│               └── scripts/validate_pricing.py
 ├── checks/
-│   └── all_checks.yaml          # All 97 check definitions with AWS CLI commands
+│   └── all_checks.yaml          # All 97 check definitions
 ├── src/
-│   ├── outputs/
-│   │   └── markdown_report.py   # Markdown generator
-│   └── parsers/
-│       └── cur_parser.py        # CUR file parser (optional)
-├── .mcp.json                    # MCP server configuration (AWS API)
+│   ├── outputs/markdown_report.py
+│   └── parsers/cur_parser.py
 ├── CLAUDE.md                    # This file
-├── README.md                    # Plugin documentation
+├── README.md                    # Documentation
 ├── main.py                      # CLI (checks, report)
 ├── findings.json                # Scan results (generated)
 └── resources.json               # Resource inventory (generated)
@@ -153,7 +152,7 @@ aws-cost-optimizer/
 
 ## Custom Subagent: aws-cost-scanner
 
-A specialized subagent for scanning AWS accounts. Located at `agents/aws-cost-scanner.md`.
+A specialized subagent for scanning AWS accounts. Located at `plugins/aws-cost-scanner/agents/aws-cost-scanner.md`.
 
 ### Features
 - Reads check definitions from `checks/all_checks.yaml`
@@ -418,6 +417,6 @@ Mark findings:
 
 For thorough analysis, run the review script:
 ```bash
-python skills/reviewing-findings/scripts/review_findings.py \
+python plugins/aws-cost-scanner/skills/reviewing-findings/scripts/review_findings.py \
   reports/findings_{profile}.json --profile {profile}
 ```

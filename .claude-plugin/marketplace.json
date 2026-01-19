@@ -16,7 +16,7 @@
       "author": {
         "name": "Mehul Prajapati"
       },
-      "source": ".",
+      "source": "./plugins/aws-cost-scanner",
       "category": "infrastructure",
       "tags": ["aws", "cost-optimization", "cloud", "finops"],
       "keywords": ["aws", "cost", "optimization", "cloud", "finops", "savings"]
