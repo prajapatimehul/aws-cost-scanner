@@ -1,0 +1,355 @@
+#!/usr/bin/env python3
+"""
+AWS Cost Findings Review Script
+
+Reviews findings.json and applies confidence adjustments based on:
+- Resource age
+- Environment (prod/dev/test)
+- Pattern analysis
+- Edge case detection
+
+Usage:
+    python review_findings.py findings.json --profile <aws-profile>
+    python review_findings.py findings.json --profile <aws-profile> --threshold 60
+"""
+
+import json
+import sys
+import argparse
+import subprocess
+import re
+from datetime import datetime, timezone, timedelta
+from typing import Any
+
+# Confidence adjustments
+ADJUSTMENTS = {
+    "resource_new_7d": -40,
+    "resource_new_14d": -20,
+    "part_of_asg": -30,
+    "dr_standby_name": -25,
+    "dev_test_name": +10,
+    "production": -10,
+    "multiple_metrics": +15,
+    "single_metric": -10,
+    "recent_change": -20,
+    "consistent_pattern": +20,
+    "burst_pattern": -25,
+    "insufficient_data": -30,
+}
+
+# Name patterns
+DR_PATTERNS = re.compile(r'(dr|standby|backup|failover|replica)', re.IGNORECASE)
+DEV_PATTERNS = re.compile(r'(dev|test|staging|sandbox|qa)', re.IGNORECASE)
+PROD_PATTERNS = re.compile(r'(prod|production|live|prd)', re.IGNORECASE)
+
+
+def run_aws_command(command: str, profile: str) -> dict | None:
+    """Execute AWS CLI command and return JSON response."""
+    full_command = f"{command} --profile {profile} --output json"
+    try:
+        result = subprocess.run(
+            full_command,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return json.loads(result.stdout)
+        return None
+    except (subprocess.TimeoutExpired, json.JSONDecodeError):
+        return None
+
+
+def detect_environment(resource_id: str, details: dict) -> str:
+    """Detect environment from resource name and tags."""
+    # Check resource ID
+    if DEV_PATTERNS.search(resource_id):
+        return "development"
+    if PROD_PATTERNS.search(resource_id):
+        return "production"
+
+    # Check tags if available
+    tags = details.get("tags", {})
+    env_tag = tags.get("Environment", tags.get("environment", tags.get("Env", "")))
+    if env_tag:
+        if DEV_PATTERNS.search(env_tag):
+            return "development"
+        if PROD_PATTERNS.search(env_tag):
+            return "production"
+
+    return "unknown"
+
+
+def detect_dr_standby(resource_id: str) -> bool:
+    """Check if resource appears to be DR/standby."""
+    return bool(DR_PATTERNS.search(resource_id))
+
+
+def check_asg_membership(instance_id: str, profile: str) -> bool:
+    """Check if EC2 instance is part of an Auto Scaling Group."""
+    if not instance_id.startswith("i-"):
+        return False
+
+    result = run_aws_command(
+        f"aws autoscaling describe-auto-scaling-instances --instance-ids {instance_id}",
+        profile
+    )
+
+    if result and result.get("AutoScalingInstances"):
+        return True
+    return False
+
+
+def check_resource_age(details: dict) -> int:
+    """Return resource age in days, or -1 if unknown."""
+    created = details.get("created_at") or details.get("launch_time") or details.get("create_time")
+    if not created:
+        return -1
+
+    try:
+        if isinstance(created, str):
+            # Handle various date formats
+            for fmt in ["%Y-%m-%dT%H:%M:%S.%fZ", "%Y-%m-%dT%H:%M:%SZ", "%Y-%m-%d"]:
+                try:
+                    created_dt = datetime.strptime(created, fmt).replace(tzinfo=timezone.utc)
+                    break
+                except ValueError:
+                    continue
+            else:
+                return -1
+        else:
+            return -1
+
+        now = datetime.now(timezone.utc)
+        age = (now - created_dt).days
+        return age
+    except Exception:
+        return -1
+
+
+def analyze_finding(finding: dict, profile: str) -> dict:
+    """Analyze a single finding and calculate confidence adjustments."""
+    check_id = finding.get("check_id", "")
+    resource_id = finding.get("resource_id", "")
+    details = finding.get("details", {})
+    original_confidence = finding.get("confidence", 70)
+
+    adjustments_applied = []
+    confidence = original_confidence
+    notes = []
+
+    # 1. Environment detection
+    env = detect_environment(resource_id, details)
+    if env == "development":
+        confidence += ADJUSTMENTS["dev_test_name"]
+        adjustments_applied.append(("dev_test_name", ADJUSTMENTS["dev_test_name"]))
+        notes.append(f"Development environment detected")
+    elif env == "production":
+        confidence += ADJUSTMENTS["production"]
+        adjustments_applied.append(("production", ADJUSTMENTS["production"]))
+        notes.append(f"Production environment - requires careful review")
+
+    # 2. DR/Standby detection
+    if detect_dr_standby(resource_id):
+        confidence += ADJUSTMENTS["dr_standby_name"]
+        adjustments_applied.append(("dr_standby_name", ADJUSTMENTS["dr_standby_name"]))
+        notes.append("DR/Standby resource - may be intentionally idle")
+
+    # 3. Resource age check
+    age_days = check_resource_age(details)
+    if age_days >= 0:
+        if age_days < 7:
+            confidence += ADJUSTMENTS["resource_new_7d"]
+            adjustments_applied.append(("resource_new_7d", ADJUSTMENTS["resource_new_7d"]))
+            notes.append(f"Resource only {age_days} days old - insufficient data")
+        elif age_days < 14:
+            confidence += ADJUSTMENTS["resource_new_14d"]
+            adjustments_applied.append(("resource_new_14d", ADJUSTMENTS["resource_new_14d"]))
+            notes.append(f"Resource {age_days} days old - limited data")
+
+    # 4. ASG membership (for EC2)
+    if check_id.startswith("EC2-001") and resource_id.startswith("i-"):
+        if check_asg_membership(resource_id, profile):
+            confidence += ADJUSTMENTS["part_of_asg"]
+            adjustments_applied.append(("part_of_asg", ADJUSTMENTS["part_of_asg"]))
+            notes.append("Part of Auto Scaling Group - likely false positive")
+
+    # 5. Data sufficiency check
+    days_monitored = details.get("days_monitored") or details.get("evaluation_period_days")
+    if days_monitored:
+        if days_monitored < 7:
+            confidence += ADJUSTMENTS["insufficient_data"]
+            adjustments_applied.append(("insufficient_data", ADJUSTMENTS["insufficient_data"]))
+            notes.append(f"Only {days_monitored} days of data - needs more monitoring")
+        elif days_monitored >= 14:
+            confidence += ADJUSTMENTS["consistent_pattern"]
+            adjustments_applied.append(("consistent_pattern", ADJUSTMENTS["consistent_pattern"]))
+            notes.append(f"Consistent pattern over {days_monitored} days")
+
+    # 6. Lambda invocation check
+    if check_id.startswith("LAMBDA"):
+        invocations = details.get("invocations") or details.get("invocation_count", 0)
+        if invocations < 50:
+            confidence += ADJUSTMENTS["insufficient_data"]
+            adjustments_applied.append(("insufficient_data", ADJUSTMENTS["insufficient_data"]))
+            notes.append(f"Only {invocations} invocations - insufficient for analysis")
+
+    # Clamp confidence to 0-100
+    confidence = max(0, min(100, confidence))
+
+    # Determine action based on final confidence
+    if confidence >= 80:
+        action = "approved"
+    elif confidence >= 60:
+        action = "approved_with_review"
+    elif confidence >= 50:
+        action = "needs_validation"
+    else:
+        action = "filtered"
+
+    return {
+        "original_confidence": original_confidence,
+        "final_confidence": confidence,
+        "adjustments": adjustments_applied,
+        "environment": env,
+        "action": action,
+        "notes": notes
+    }
+
+
+def review_findings(findings_path: str, profile: str, threshold: int = 50) -> None:
+    """Review all findings and update with review status."""
+
+    # Load findings
+    with open(findings_path, 'r') as f:
+        data = json.load(f)
+
+    findings = data.get("findings", [])
+
+    if not findings:
+        print("No findings to review.")
+        return
+
+    # Check if already reviewed
+    already_reviewed = sum(1 for f in findings if f.get("review_status"))
+    if already_reviewed == len(findings):
+        print(f"All {len(findings)} findings already reviewed. Use --force to re-review.")
+        return
+
+    print(f"Reviewing {len(findings)} findings...\n")
+
+    # Statistics
+    stats = {
+        "approved": 0,
+        "approved_with_review": 0,
+        "needs_validation": 0,
+        "filtered": 0
+    }
+
+    reviewed_findings = []
+
+    for finding in findings:
+        # Skip already reviewed unless forced
+        if finding.get("review_status"):
+            reviewed_findings.append(finding)
+            stats[finding["review_status"]["action"]] += 1
+            continue
+
+        # Analyze finding
+        analysis = analyze_finding(finding, profile)
+
+        # Add review status
+        finding["review_status"] = {
+            "reviewed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+            "original_confidence": analysis["original_confidence"],
+            "final_confidence": analysis["final_confidence"],
+            "adjustments": analysis["adjustments"],
+            "environment": analysis["environment"],
+            "action": analysis["action"],
+            "notes": "; ".join(analysis["notes"]) if analysis["notes"] else "No adjustments"
+        }
+
+        stats[analysis["action"]] += 1
+        reviewed_findings.append(finding)
+
+    # Update findings
+    data["findings"] = reviewed_findings
+
+    # Update metadata
+    if "metadata" not in data:
+        data["metadata"] = {}
+
+    data["metadata"]["review_summary"] = {
+        "reviewed_at": datetime.now(timezone.utc).isoformat().replace("+00:00", "Z"),
+        "total_findings": len(findings),
+        "approved": stats["approved"],
+        "approved_with_review": stats["approved_with_review"],
+        "needs_validation": stats["needs_validation"],
+        "filtered": stats["filtered"],
+        "filter_threshold": threshold
+    }
+
+    # Calculate savings for approved findings only
+    approved_savings = sum(
+        f.get("monthly_savings", 0)
+        for f in reviewed_findings
+        if f.get("review_status", {}).get("action") in ["approved", "approved_with_review"]
+    )
+    data["metadata"]["approved_monthly_savings"] = round(approved_savings, 2)
+
+    # Save updated findings
+    with open(findings_path, 'w') as f:
+        json.dump(data, f, indent=2)
+
+    # Print summary
+    print("=" * 60)
+    print("REVIEW SUMMARY")
+    print("=" * 60)
+    print(f"\nTotal Findings: {len(findings)}")
+    print(f"\n✓ Approved (≥80%):              {stats['approved']}")
+    print(f"✓ Approved with Review (60-79%): {stats['approved_with_review']}")
+    print(f"⚠ Needs Validation (50-59%):     {stats['needs_validation']}")
+    print(f"✗ Filtered (<50%):               {stats['filtered']}")
+    print(f"\nApproved Monthly Savings: ${approved_savings:,.2f}")
+    print(f"\nUpdated: {findings_path}")
+
+    # Print filtered findings
+    if stats["filtered"] > 0:
+        print("\n" + "-" * 60)
+        print("FILTERED FINDINGS (False Positives)")
+        print("-" * 60)
+        for f in reviewed_findings:
+            if f.get("review_status", {}).get("action") == "filtered":
+                print(f"\n• {f['check_id']}: {f.get('title', 'Unknown')}")
+                print(f"  Resource: {f['resource_id'][:40]}...")
+                print(f"  Original: {f['review_status']['original_confidence']}% → Final: {f['review_status']['final_confidence']}%")
+                print(f"  Reason: {f['review_status']['notes']}")
+
+    # Print needs validation
+    if stats["needs_validation"] > 0:
+        print("\n" + "-" * 60)
+        print("NEEDS VALIDATION")
+        print("-" * 60)
+        for f in reviewed_findings:
+            if f.get("review_status", {}).get("action") == "needs_validation":
+                print(f"\n• {f['check_id']}: {f.get('title', 'Unknown')}")
+                print(f"  Resource: {f['resource_id'][:40]}...")
+                print(f"  Confidence: {f['review_status']['final_confidence']}%")
+                print(f"  Issue: {f['review_status']['notes']}")
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Review AWS cost optimization findings")
+    parser.add_argument("findings_file", help="Path to findings.json")
+    parser.add_argument("--profile", required=True, help="AWS profile name")
+    parser.add_argument("--threshold", type=int, default=50, help="Confidence threshold (default: 50)")
+    parser.add_argument("--force", action="store_true", help="Re-review already reviewed findings")
+
+    args = parser.parse_args()
+
+    review_findings(args.findings_file, args.profile, args.threshold)
+
+
+if __name__ == "__main__":
+    main()

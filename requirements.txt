@@ -1,0 +1,2 @@
+pyyaml>=6.0
+pyarrow>=14.0  # Optional: for CUR parquet support
