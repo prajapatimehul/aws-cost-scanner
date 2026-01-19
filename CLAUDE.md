@@ -119,30 +119,41 @@ python main.py report --findings findings.json
 
 ```
 aws-cost-optimizer/
-├── CLAUDE.md              # This file
-├── main.py                # CLI (checks, report)
+├── .claude-plugin/
+│   └── plugin.json              # Plugin metadata
+├── agents/
+│   └── aws-cost-scanner.md      # Subagent for parallel domain scanning
+├── commands/
+│   └── scan.md                  # /scan workflow (7 steps)
+├── skills/
+│   ├── reviewing-findings/
+│   │   ├── reviewing-findings.md    # Skill definition
+│   │   ├── REVIEW_CRITERIA.md
+│   │   └── scripts/
+│   │       └── review_findings.py
+│   └── validating-aws-pricing/
+│       ├── validating-aws-pricing.md  # Skill definition
+│       ├── PRICING_REFERENCE.md
+│       └── scripts/
+│           └── validate_pricing.py
 ├── checks/
-│   └── all_checks.yaml    # All 97 check definitions with AWS CLI commands
+│   └── all_checks.yaml          # All 97 check definitions with AWS CLI commands
 ├── src/
 │   ├── outputs/
 │   │   └── markdown_report.py   # Markdown generator
 │   └── parsers/
 │       └── cur_parser.py        # CUR file parser (optional)
-├── .claude/
-│   ├── agents/
-│   │   └── aws-cost-scanner.md  # Subagent for parallel domain scanning
-│   ├── commands/
-│   │   └── scan.md              # /scan workflow (7 steps)
-│   └── skills/                  # Optional deep analysis
-│       ├── validating-aws-pricing/
-│       └── reviewing-findings/
-├── findings.json          # Scan results (generated)
-└── resources.json         # Resource inventory (generated)
+├── .mcp.json                    # MCP server configuration (AWS API)
+├── CLAUDE.md                    # This file
+├── README.md                    # Plugin documentation
+├── main.py                      # CLI (checks, report)
+├── findings.json                # Scan results (generated)
+└── resources.json               # Resource inventory (generated)
 ```
 
 ## Custom Subagent: aws-cost-scanner
 
-A specialized subagent for scanning AWS accounts. Located at `.claude/agents/aws-cost-scanner.md`.
+A specialized subagent for scanning AWS accounts. Located at `agents/aws-cost-scanner.md`.
 
 ### Features
 - Reads check definitions from `checks/all_checks.yaml`
@@ -348,7 +359,7 @@ Supported formats: Parquet (preferred), CSV
 | **Low** | Consider when convenient | Minor optimizations |
 | **Info** | Awareness only | Compliance, tagging |
 
-## Scan Workflow (7 Steps, ~20 min)
+## Scan Workflow (8 Steps)
 
 ```
 1. Discover account & regions
@@ -356,8 +367,9 @@ Supported formats: Parquet (preferred), CSV
 3. Get actual monthly spend from Cost Explorer
 4. Parallel domain scan (6 agents)
 5. Quick review (2 checks: resource age, environment)
-6. Generate report
-7. Show top findings & ask what to implement
+6. MANDATORY: Price validation (sanity check all findings)
+7. Generate report
+8. Show top findings & ask what to implement
 ```
 
 ### Quick Review (Inline)
@@ -371,15 +383,41 @@ Mark findings:
 - `needs_validation` if confidence 50-69%
 - `filtered` if confidence < 50%
 
-### Price Validation
+### MANDATORY: Price Validation
 
-Only flag findings with `monthly_savings > $100` for manual verification.
-Trust smaller amounts to keep the scan fast.
+**CRITICAL** - Run BEFORE generating the report:
+
+1. **Sanity Check:** `finding.monthly_savings <= service.monthly_spend`
+   - Example: If CloudWatch costs $159/mo, a finding CANNOT save $594/mo
+
+2. **Verify Formulas:** Each finding type has a specific formula:
+   | Finding | Formula |
+   |---------|---------|
+   | CW Logs Retention | `stored_gb × $0.03` (storage only, NOT $0.50 ingestion) |
+   | Unattached EBS | `size_gb × price_per_gb` |
+   | Idle EC2 | `hourly_rate × 730` |
+
+3. **For findings > $100:** Query usage-type breakdown:
+   ```bash
+   aws ce get-cost-and-usage \
+     --filter '{"Dimensions": {"Key": "SERVICE", "Values": ["AmazonCloudWatch"]}}' \
+     --group-by Type=DIMENSION,Key=USAGE_TYPE
+   ```
+
+4. **Correct & Flag:** If a finding fails validation:
+   - Recalculate with correct formula
+   - Add `pricing_corrected: true` to details
+   - Document the correction reason
+
+**Common Mistakes to Avoid:**
+- CloudWatch Logs: Using $0.50/GB (ingestion) instead of $0.03/GB (storage)
+- Not checking if savings exceed actual service spend
+- Missing cost components (EBS has storage + IOPS + throughput)
 
 ### Optional: Deep Review
 
 For thorough analysis, run the review script:
 ```bash
-python .claude/skills/reviewing-findings/scripts/review_findings.py \
+python skills/reviewing-findings/scripts/review_findings.py \
   reports/findings_{profile}.json --profile {profile}
 ```

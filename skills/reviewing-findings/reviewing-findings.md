@@ -47,17 +47,17 @@ Agent #1: Resource Verification
 Agent #2: Recommendation Quality
 ├── Validate recommendation is actionable
 ├── Check for edge cases (ASG, DR, scheduled)
-├── Verify savings calculation logic
+└── Verify savings calculation logic
 
 Agent #3: Business Context
 ├── Identify environment (prod/dev/staging)
 ├── Check for dependencies
-├── Flag potential risks
+└── Flag potential risks
 
 Agent #4: Historical Pattern
 ├── Check for burst patterns
 ├── Identify seasonal usage
-├── Review recent changes
+└── Review recent changes
 ```
 
 ### 3. Confidence Scoring

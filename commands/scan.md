@@ -88,7 +88,7 @@ Pass to each:
 - `compliance`: User's selection
 - `profile`: AWS profile name
 
-## Step 6: Merge, Review & Save
+## Step 6: Merge & Quick Review
 
 Combine all 6 outputs into `reports/findings_{profile}.json`.
 
@@ -103,7 +103,66 @@ Mark findings:
 - `needs_validation` if confidence 50-69%
 - `filtered` if confidence < 50%
 
-**Price Validation:** Only flag findings with `monthly_savings > $100` for manual verification. Trust smaller amounts.
+## Step 6.5: MANDATORY Price Validation
+
+**CRITICAL:** Before generating the report, validate ALL pricing calculations.
+
+### 6.5.1: Get Service-Level Billing
+
+Query Cost Explorer for service breakdown:
+```bash
+aws ce get-cost-and-usage --profile {profile} \
+  --time-period Start={LAST_MONTH_START},End={LAST_MONTH_END} \
+  --granularity MONTHLY \
+  --metrics UnblendedCost \
+  --group-by Type=DIMENSION,Key=SERVICE
+```
+
+### 6.5.2: Sanity Check Each Finding
+
+For EVERY finding, verify:
+```
+finding.monthly_savings <= service_monthly_spend
+```
+
+**Example Check:**
+- Finding: CloudWatch Logs savings = $594/mo
+- Billing: CloudWatch total = $159/mo
+- **FAIL** - Finding exceeds service spend!
+
+### 6.5.3: Verify Calculation Formula
+
+Each finding type has a SPECIFIC formula:
+
+| Finding Type | Correct Formula |
+|--------------|-----------------|
+| CW Logs Retention | `stored_gb × $0.03` (storage only) |
+| Unattached EBS | `size_gb × price_per_gb` |
+| Idle EC2 | `hourly_rate × 730` |
+| Over-provisioned | `current_cost - recommended_cost` |
+| No RI Coverage | `on_demand_cost × savings_percent` |
+
+### 6.5.4: Flag & Correct Invalid Findings
+
+If a finding fails validation:
+1. Recalculate using correct formula
+2. Update `monthly_savings` with corrected value
+3. Add `pricing_corrected: true` to details
+4. Document the correction reason
+
+### 6.5.5: Get Detailed Cost Breakdown (for >$100 findings)
+
+For findings claiming >$100 savings, query usage type breakdown:
+```bash
+aws ce get-cost-and-usage --profile {profile} \
+  --time-period Start={LAST_MONTH_START},End={LAST_MONTH_END} \
+  --granularity MONTHLY \
+  --metrics UnblendedCost \
+  --filter '{"Dimensions": {"Key": "SERVICE", "Values": ["AmazonCloudWatch"]}}' \
+  --group-by Type=DIMENSION,Key=USAGE_TYPE
+```
+
+This reveals actual storage vs ingestion costs.
 
 ## Step 7: Generate Report
 

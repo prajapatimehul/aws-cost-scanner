@@ -2,6 +2,31 @@
 
 A Claude Code plugin with **97 automated cost optimization checks** across 6 AWS domains.
 
+## Installation
+
+### Via GitHub
+
+```bash
+/plugin add github:prajapatimehul/aws-cost-scanner
+```
+
+### Manual Installation
+
+Add to your `.claude/settings.json`:
+
+```json
+{
+  "plugins": ["prajapatimehul/aws-cost-scanner"]
+}
+```
+
+Or clone and add locally:
+
+```bash
+git clone https://github.com/prajapatimehul/aws-cost-scanner.git
+# Then add the path to your settings.json
+```
+
 ## Features
 
 - **Parallel scanning** - 6 domain agents run simultaneously

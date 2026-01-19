@@ -2,6 +2,52 @@
 
 Complete reference for querying AWS pricing data.
 
+---
+
+## CRITICAL: Common Pricing Mistakes
+
+**READ THIS FIRST** to avoid incorrect savings estimates.
+
+### Mistake 1: CloudWatch Logs - Wrong Price Component
+
+| Component | Price | When Charged | Affected by Retention? |
+|-----------|-------|--------------|------------------------|
+| **Ingestion** | $0.50/GB | Once, when logs arrive | NO |
+| **Storage** | $0.03/GB-month | Monthly, for stored data | YES |
+
+**WRONG:** `savings = stored_gb × $0.50` (uses ingestion price)
+**CORRECT:** `savings = stored_gb × $0.03` (uses storage price)
+
+### Mistake 2: Savings Exceed Service Spend
+
+**ALWAYS verify:** `finding.monthly_savings <= service.monthly_spend`
+
+If CloudWatch costs $159/mo total, you CANNOT save $594/mo on it.
+
+### Mistake 3: Not Checking Usage Type Breakdown
+
+For findings > $100, query Cost Explorer with `USAGE_TYPE` grouping:
+```bash
+aws ce get-cost-and-usage \
+  --filter '{"Dimensions": {"Key": "SERVICE", "Values": ["AmazonCloudWatch"]}}' \
+  --group-by Type=DIMENSION,Key=USAGE_TYPE
+```
+
+This shows actual storage vs ingestion costs.
+
+### Mistake 4: Using Multipliers Without Understanding
+
+Never use arbitrary multipliers. Always trace back to the formula:
+
+| Finding Type | Formula |
+|--------------|---------|
+| CW Logs Retention | `stored_gb × $0.03` |
+| EBS Volume | `size_gb × price_per_gb` |
+| EC2 Instance | `hourly_rate × 730` |
+| RDS Downsize | `(current_hourly - new_hourly) × 730` |
+
+---
+
 ## API Basics
 
 ### Endpoint Regions

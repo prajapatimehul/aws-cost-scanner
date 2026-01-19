@@ -144,7 +144,78 @@ Use these for estimating `monthly_savings` on individual findings.
 | gp2/GB | $0.10 |
 | NAT Gateway | $32 + data |
 | EIP (unattached) | $3.65 |
-| CW Logs/GB | $0.03 |
+| CW Logs Storage | $0.03/GB-month |
+| CW Logs Ingestion | $0.50/GB (NOT recurring) |
+
+---
+
+## CRITICAL: Pricing Validation Rules
+
+**MANDATORY** - Every finding MUST follow these rules:
+
+### Rule 1: Use Exact Formulas
+
+| Finding Type | Formula | Example |
+|--------------|---------|---------|
+| **Idle EC2** | `hourly_rate × 730` | t2.nano: $0.0058 × 730 = $4.23/mo |
+| **Unattached EBS** | `size_gb × price_per_gb` | 100GB gp3: 100 × $0.08 = $8.00/mo |
+| **CW Logs Retention** | `stored_gb × $0.03` | 221GB: 221 × $0.03 = $6.63/mo |
+| **Over-provisioned** | `(current - recommended) cost` | db.r5.xlarge→large: $365 - $182 = $183/mo |
+| **No RI Coverage** | `on_demand × savings_percent` | db.r5.xlarge: $365 × 40% = $146/mo |
+
+### Rule 2: Sanity Check Against Billing
+
+**BEFORE reporting a finding**, verify:
+```
+finding.monthly_savings <= service_monthly_spend
+```
+
+Example: If CloudWatch total spend is $159/mo, a single finding CANNOT save $594/mo.
+
+### Rule 3: Distinguish Storage vs Ingestion
+
+**CloudWatch Logs has TWO cost components:**
+- **Storage:** $0.03/GB-month (recurring, reducible with retention)
+- **Ingestion:** $0.50/GB (one-time, NOT affected by retention)
+
+Setting retention ONLY reduces storage costs, NOT ingestion costs.
+
+### Rule 4: Show Calculation in Details
+
+Every finding MUST include calculation breakdown:
+```json
+{
+  "monthly_savings": 6.64,
+  "details": {
+    "calculation": "221.4 GB × $0.03/GB = $6.64",
+    "pricing_source": "CW Logs Storage: $0.03/GB-month"
+  }
+}
+```
+
+### Rule 5: Flag Findings > $100 for Review
+
+Any finding with `monthly_savings > $100` MUST be flagged:
+```json
+{
+  "monthly_savings": 594.34,
+  "requires_validation": true,
+  "validation_reason": "Exceeds $100 threshold"
+}
+```
+
+---
+
+## Common Pricing Mistakes (DO NOT MAKE)
+
+| Mistake | Wrong | Correct |
+|---------|-------|---------|
+| CW Logs savings | stored_gb × $0.50 | stored_gb × $0.03 |
+| Confusing ingestion/storage | "Setting retention saves $0.50/GB" | "Setting retention saves $0.03/GB stored" |
+| Not checking billing | Finding: $600/mo savings | Check: Service spend only $159/mo |
+| Using wrong multiplier | stored_gb × 2.68 | stored_gb × 0.03 |
+
+---
 
 ## Rules
 
@@ -152,3 +223,6 @@ Use these for estimating `monthly_savings` on individual findings.
 2. Include Name tags in `resource_name`
 3. Return `[]` if no issues
 4. Be conservative with savings
+5. **ALWAYS show calculation in details**
+6. **ALWAYS sanity-check against actual billing**
+7. **FLAG findings > $100 for validation**
