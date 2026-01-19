@@ -6,7 +6,7 @@
       "name": "aws-cost-scanner",
       "version": "1.0.0",
       "description": "97 automated AWS cost optimization checks across 6 domains with parallel scanning and confidence-based filtering",
-      "path": "."
+      "source": "."
     }
   ]
 }
