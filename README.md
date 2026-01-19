@@ -54,18 +54,17 @@ Recommended: Use the `ReadOnlyAccess` managed policy or create a custom policy.
 
 ## Installation
 
-### Via GitHub (Recommended)
+### Via Plugin Marketplace (Recommended)
 
-```bash
-claude plugin add git@github.com:prajapatimehul/aws-cost-scanner.git
-```
-
-### Via Plugin Marketplace
-
-```
-/plugin
-```
-Then search for `prajapatimehul/aws-cost-scanner` and install.
+1. Run `/plugin` in Claude Code
+2. Press `Tab` or arrow keys to navigate to **Marketplaces**
+3. Select **+ Add Marketplace**
+4. Enter the GitHub URL:
+   ```
+   git@github.com:prajapatimehul/aws-cost-scanner.git
+   ```
+5. Select `aws-cost-scanner` from the list
+6. Press Enter to install
 
 ### Via Command Line (MCP Server Only)
 
@@ -81,7 +80,7 @@ After installation:
 
 ```bash
 # Start the scan workflow
-/scan
+/aws-cost-scanner:scan
 
 # Or ask directly
 Scan my AWS account for cost optimization opportunities
@@ -110,9 +109,9 @@ Scan my AWS account for cost optimization opportunities
 
 | Command | Description |
 |---------|-------------|
-| `/scan` | Run the full 8-step cost optimization workflow |
-| `/reviewing-findings` | Review findings with confidence scoring |
-| `/validating-aws-pricing` | Validate pricing against AWS Pricing API |
+| `/aws-cost-scanner:scan` | Run the full 8-step cost optimization workflow |
+| `/aws-cost-scanner:reviewing-findings` | Review findings with confidence scoring |
+| `/aws-cost-scanner:validating-aws-pricing` | Validate pricing against AWS Pricing API |
 
 ## Output
 
