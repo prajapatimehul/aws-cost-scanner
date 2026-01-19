@@ -5,9 +5,5 @@
   "author": {
     "name": "Mehul Prajapati",
     "email": "mehul@example.com"
-  },
-  "license": "MIT",
-  "keywords": ["aws", "cost", "optimization", "cloud", "finops", "savings"],
-  "category": "infrastructure",
-  "homepage": "https://github.com/prajapatimehul/aws-cost-scanner"
+  }
 }
