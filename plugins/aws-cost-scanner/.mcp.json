@@ -2,7 +2,10 @@
   "mcpServers": {
     "awslabs-aws-api": {
       "command": "uvx",
-      "args": ["awslabs.aws-mcp-server@latest"]
+      "args": ["awslabs.aws-api-mcp-server@latest"],
+      "env": {
+        "FASTMCP_LOG_LEVEL": "ERROR"
+      }
     }
   }
 }
