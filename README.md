@@ -54,6 +54,12 @@ Recommended: Use the `ReadOnlyAccess` managed policy or create a custom policy.
 
 ## Installation
 
+### Via GitHub (Recommended)
+
+```bash
+claude plugin add git@github.com:prajapatimehul/aws-cost-scanner.git
+```
+
 ### Via Plugin Marketplace
 
 ```
@@ -61,7 +67,9 @@ Recommended: Use the `ReadOnlyAccess` managed policy or create a custom policy.
 ```
 Then search for `prajapatimehul/aws-cost-scanner` and install.
 
-### Via Command Line
+### Via Command Line (MCP Server Only)
+
+If you only need the AWS MCP server without the full plugin:
 
 ```bash
 claude mcp add awslabs-aws-api -- uvx awslabs.aws-mcp-server@latest
