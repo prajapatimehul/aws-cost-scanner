@@ -11,25 +11,37 @@ allowed-tools:
 
 # Validating AWS Pricing
 
-Corrects cost estimates in `findings.json` using live AWS Pricing API data.
+Validates cost estimates in `findings.json` using **real AWS Pricing API** for big findings (>$100).
 
 ## Purpose
 
-This skill **updates findings with correct pricing** - it does not just validate or report errors. After running, all `monthly_savings` values will reflect actual AWS prices.
+This skill validates pricing for significant findings using live AWS Pricing API. Smaller findings use fallback estimates to avoid unnecessary API calls.
 
 ## Quick Start
 
 ```bash
+# Validate with default $100 threshold (queries API only for >$100 findings)
 python .claude/skills/validating-aws-pricing/scripts/validate_pricing.py findings.json --profile ctm
+
+# Lower threshold to validate more findings
+python .claude/skills/validating-aws-pricing/scripts/validate_pricing.py findings.json --profile ctm --threshold 50
+
+# Works with any AWS auth method (SSO, access keys, IAM role)
+python .claude/skills/validating-aws-pricing/scripts/validate_pricing.py findings.json  # uses default credentials
 ```
 
 ## What Gets Updated
 
-For each finding, the script:
-1. Queries AWS Pricing API for the resource type
-2. Calculates the correct monthly cost/savings
-3. **Updates `monthly_savings`** with the accurate value
-4. Adds `pricing_validated` metadata showing the source
+For findings **above threshold** (default $100):
+1. Queries real AWS Pricing API for EC2, RDS, EBS
+2. Updates `monthly_savings` with validated value
+3. Marks `api_validated: true` in metadata
+
+For findings **below threshold**:
+1. Uses fallback estimates (fast, no API calls)
+2. Marks `api_validated: false` in metadata
+
+All findings get `pricing_validated` metadata showing the source.
 
 ## Pricing Calculation by Finding Type
 

@@ -18,8 +18,7 @@ import sys
 import argparse
 import subprocess
 import re
-from datetime import datetime, timezone, timedelta
-from typing import Any
+from datetime import datetime, timezone
 
 # Confidence adjustments
 ADJUSTMENTS = {
@@ -218,24 +217,35 @@ def analyze_finding(finding: dict, profile: str) -> dict:
     }
 
 
-def review_findings(findings_path: str, profile: str, threshold: int = 50) -> None:
+def review_findings(findings_path: str, profile: str, threshold: int = 50, force: bool = False) -> None:
     """Review all findings and update with review status."""
 
-    # Load findings
-    with open(findings_path, 'r') as f:
-        data = json.load(f)
+    # Load findings with error handling
+    try:
+        with open(findings_path, 'r') as f:
+            data = json.load(f)
+    except FileNotFoundError:
+        print(f"Error: File not found: {findings_path}")
+        sys.exit(1)
+    except json.JSONDecodeError as e:
+        print(f"Error: Invalid JSON in {findings_path}: {e}")
+        sys.exit(1)
 
     findings = data.get("findings", [])
 
     if not findings:
         print("No findings to review.")
+        print("Run a scan first to generate findings.json")
         return
 
     # Check if already reviewed
     already_reviewed = sum(1 for f in findings if f.get("review_status"))
-    if already_reviewed == len(findings):
+    if already_reviewed == len(findings) and not force:
         print(f"All {len(findings)} findings already reviewed. Use --force to re-review.")
         return
+
+    if force and already_reviewed > 0:
+        print(f"Force re-reviewing {already_reviewed} previously reviewed findings...")
 
     print(f"Reviewing {len(findings)} findings...\n")
 
@@ -251,10 +261,14 @@ def review_findings(findings_path: str, profile: str, threshold: int = 50) -> No
 
     for finding in findings:
         # Skip already reviewed unless forced
-        if finding.get("review_status"):
+        if finding.get("review_status") and not force:
             reviewed_findings.append(finding)
             stats[finding["review_status"]["action"]] += 1
             continue
+
+        # Clear previous review status if force re-reviewing
+        if force and finding.get("review_status"):
+            del finding["review_status"]
 
         # Analyze finding
         analysis = analyze_finding(finding, profile)
@@ -348,7 +362,7 @@ def main():
 
     args = parser.parse_args()
 
-    review_findings(args.findings_file, args.profile, args.threshold)
+    review_findings(args.findings_file, args.profile, args.threshold, args.force)
 
 
 if __name__ == "__main__":

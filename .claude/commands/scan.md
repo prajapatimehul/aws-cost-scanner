@@ -5,10 +5,16 @@ allowed-tools: Read, Task, Write, Bash, Glob, Grep, AskUserQuestion, mcp__awslab
 
 # AWS Cost Optimization Scan
 
+**Authentication:** AWS commands work with any valid AWS credentials:
+- SSO profile: `--profile your-sso-profile`
+- Named profile: `--profile your-profile`
+- Environment variables: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`
+- IAM role (EC2/Lambda): automatic
+
 ## Step 1: Discover Account
 
 ```bash
-aws sts get-caller-identity
+aws sts get-caller-identity --profile {profile}
 ```
 
 Extract:
@@ -19,10 +25,10 @@ Extract:
 
 ```bash
 # Get all regions
-aws ec2 describe-regions --query 'Regions[].RegionName' --output json
+aws ec2 describe-regions --profile {profile} --query 'Regions[].RegionName' --output json
 
 # Check which have EC2 instances (quick check)
-aws ec2 describe-instances --query 'Reservations[].Instances[0].Placement.AvailabilityZone' --output text
+aws ec2 describe-instances --profile {profile} --query 'Reservations[].Instances[0].Placement.AvailabilityZone' --output text
 ```
 
 Only scan regions with resources.
@@ -53,14 +59,16 @@ Use `AskUserQuestion`:
 
 ```bash
 aws ce get-cost-and-usage \
+  --profile {profile} \
   --time-period Start={LAST_MONTH_START},End={LAST_MONTH_END} \
   --granularity MONTHLY \
   --metrics UnblendedCost \
-  --group-by Type=DIMENSION,Key=SERVICE \
-  --profile {profile}
+  --group-by Type=DIMENSION,Key=SERVICE
 ```
 
 Store `actual_monthly_spend` in metadata.
+
+**Note:** If no `--profile` is provided, AWS CLI uses default credentials (env vars or IAM role).
 
 ## Step 5: Parallel Domain Scan
 
