@@ -72,7 +72,7 @@ Store `actual_monthly_spend` in metadata.
 
 ## Step 5: Parallel Domain Scan
 
-Launch 6 `aws-cost-scanner` subagents **in parallel**:
+Launch 6 `aws-cost-scanner:aws-cost-scanner` subagents **in parallel**:
 
 | Agent | Domain | Checks |
 |-------|--------|--------|
@@ -163,6 +163,64 @@ aws ce get-cost-and-usage --profile {profile} \
 ```
 
 This reveals actual storage vs ingestion costs.
+
+## Step 6.6: Calculate Priority Scores
+
+Rank findings by actionability, not just savings amount.
+
+### Formula
+
+```
+priority_score = impact × confidence × urgency × risk_multiplier
+```
+
+### Components
+
+| Component | Calculation | Range |
+|-----------|-------------|-------|
+| Impact | min(monthly_savings / 100, 10) | 0.1 - 10 |
+| Confidence | confidence / 100 | 0.5 - 1.0 |
+| Urgency | Based on idle duration | 0.7 - 1.5 |
+| Risk Multiplier | Based on environment | 0.5 - 1.5 |
+
+### Urgency Values
+
+| Idle Duration | Urgency |
+|---------------|---------|
+| > 30 days | 1.5 |
+| 14-30 days | 1.2 |
+| 7-14 days | 1.0 |
+| < 7 days | 0.7 |
+
+### Risk Multiplier Values
+
+| Environment | Multiplier |
+|-------------|------------|
+| dev/test | 1.5 (lower risk) |
+| staging | 1.0 |
+| production | 0.5 (higher risk) |
+
+### Example
+
+```
+Finding: Idle RDS ($365/mo), 85% confidence, 21 days idle, production
+
+impact = min(365/100, 10) = 3.65
+confidence = 0.85
+urgency = 1.2 (14-30 days)
+risk = 0.5 (production)
+
+priority_score = 3.65 × 0.85 × 1.2 × 0.5 = 1.86 (MEDIUM)
+```
+
+### Priority Ranking
+
+| Score | Priority | Action |
+|-------|----------|--------|
+| > 5.0 | Critical | This week |
+| 2.0-5.0 | High | This month |
+| 1.0-2.0 | Medium | Next quarter |
+| < 1.0 | Low | When convenient |
 
 ## Step 7: Generate Report
 

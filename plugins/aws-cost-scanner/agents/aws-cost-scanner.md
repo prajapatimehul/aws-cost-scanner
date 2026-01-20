@@ -43,6 +43,37 @@ Scan ONE domain for cost optimization findings.
 | SOC2 | Don't delete logs (but CAN set retention) | `soc2-audit-required` |
 | PCI-DSS | Skip `pci=true` tags, payment VPCs | `pci-dss-protected` |
 
+## Tag-Based Exclusions
+
+### SkipCostOpt Tag
+
+Resources with `SkipCostOpt=true` are **excluded from ALL checks**.
+
+### Exclusion Tags (Honor Any)
+
+| Tag Key | Truthy Values |
+|---------|---------------|
+| SkipCostOpt | true, 1, yes |
+| CostOptExclude | true, 1, yes |
+| DoNotOptimize | true, 1, yes |
+
+### Check Tags in Resource Data
+
+```bash
+# Tags included in describe-* responses
+# Check Tags array for exclusion keys
+```
+
+### Output When Excluded
+
+```json
+{
+  "resource_id": "i-abc123",
+  "status": "excluded",
+  "exclusion_reason": "Tag SkipCostOpt=true"
+}
+```
+
 ## Output Format
 
 ```json
@@ -117,17 +148,128 @@ Scan ONE domain for cost optimization findings.
 - `reserved_db_instances`: RDS RIs
 - `savings_plans`: Active plans
 
-## Confidence Scoring
+## Cost-Tiered Confidence
 
-| Score | Action |
-|-------|--------|
-| ≥70 | Approved |
-| 50-69 | Needs validation |
-| <50 | Filter out |
+Higher-cost findings need MORE evidence before flagging.
 
-**Quick adjustments (2 only):**
+### Confidence Tiers
+
+| Tier | Monthly Cost | Min Age | Min Confidence | Signals Required |
+|------|-------------|---------|----------------|------------------|
+| LOW | < $20 | 1 day | 65% | 1 signal OK |
+| MEDIUM | $20 - $100 | 3 days | 75% | 2+ signals |
+| HIGH | > $100 | 7 days | 85% | 2+ signals |
+
+### Apply Before Reporting
+
+1. Calculate monthly_savings → determine tier
+2. Check resource age >= tier.min_age_days
+3. Check confidence >= tier.min_confidence
+4. For MEDIUM/HIGH: verify 2+ signals agree
+5. If any check fails → filter out finding
+
+### Quick Adjustments (Apply After Tier Check)
+
 - **-30%** if resource < 7 days old
-- **±10%** based on environment (production = -10%, dev/test = +10%)
+- **-10%** for production environment
+- **+10%** for dev/test environment
+- **-30%** if part of Auto Scaling Group
+
+---
+
+## Multi-Signal Idle Detection
+
+**CRITICAL**: Do NOT flag resources as idle based on CPU alone. Use weighted multi-signal scoring.
+
+### EC2 Idle Detection
+
+| Signal | Metric | Threshold | Weight |
+|--------|--------|-----------|--------|
+| CPU | CPUUtilization avg | < 5% | 0.40 |
+| Network In | NetworkIn | < 0.1 GB/day | 0.15 |
+| Network Out | NetworkOut | < 0.1 GB/day | 0.15 |
+| Connections | NetworkPacketsIn | 0 | 0.20 |
+| Disk I/O | DiskReadOps+WriteOps | < 10/sec | 0.10 |
+
+**Idle Score Formula:**
+```
+idleScore = sum(weights where threshold met)
+Threshold: idleScore >= 0.60 required to flag as idle
+```
+
+### Required AWS Commands
+
+```bash
+# Collect ALL signals (not just CPU)
+aws cloudwatch get-metric-statistics --namespace AWS/EC2 \
+  --metric-name CPUUtilization --dimensions Name=InstanceId,Value={id} \
+  --start-time {14d_ago} --end-time {now} --period 86400 --statistics Average Maximum
+
+aws cloudwatch get-metric-statistics --namespace AWS/EC2 \
+  --metric-name NetworkIn --dimensions Name=InstanceId,Value={id} \
+  --start-time {14d_ago} --end-time {now} --period 86400 --statistics Sum
+
+aws cloudwatch get-metric-statistics --namespace AWS/EC2 \
+  --metric-name NetworkPacketsIn --dimensions Name=InstanceId,Value={id} \
+  --start-time {14d_ago} --end-time {now} --period 86400 --statistics Sum
+```
+
+### Finding Output Format
+
+```json
+{
+  "check_id": "EC2-001",
+  "idle_detection": {
+    "signals": {
+      "cpu_avg": {"value": 2.1, "threshold": 5, "passed": true, "weight": 0.40},
+      "network_in_gb": {"value": 0.05, "threshold": 0.1, "passed": true, "weight": 0.15},
+      "connections": {"value": 145, "threshold": 0, "passed": false, "weight": 0.20}
+    },
+    "idle_score": 0.55,
+    "threshold": 0.60,
+    "result": "NOT_IDLE - has active connections"
+  }
+}
+```
+
+---
+
+## Live Dependency Checks (MANDATORY SAFETY)
+
+Before recommending deletion, verify NO active dependencies.
+
+### Dependency Check Matrix
+
+| Resource | Check Command | If Found | Action |
+|----------|--------------|----------|--------|
+| EC2 | `aws autoscaling describe-auto-scaling-instances --instance-ids {id}` | ASG member | **SKIP** |
+| NAT Gateway | `aws ec2 describe-route-tables --filters "Name=route.nat-gateway-id,Values={id}"` | Routes exist | **SKIP** |
+| ELB | `aws elbv2 describe-target-health --target-group-arn {arn}` | Healthy targets | **SKIP** |
+| EBS Snapshot | `aws ec2 describe-images --filters "Name=block-device-mapping.snapshot-id,Values={id}"` | AMI uses it | Add warning |
+| EFS | `aws efs describe-mount-targets --file-system-id {id}` | Mount targets | Add warning |
+
+### Output When Blocked
+
+```json
+{
+  "check_id": "EC2-001",
+  "resource_id": "i-abc123",
+  "dependency_check": {
+    "type": "asg_membership",
+    "result": "member_of: my-asg",
+    "safe_to_recommend": false
+  },
+  "status": "skipped",
+  "skip_reason": "Resource is member of Auto Scaling Group 'my-asg'"
+}
+```
+
+### DO NOT
+
+- Recommend deleting EC2 without checking ASG membership
+- Recommend deleting NAT without checking route tables
+- Recommend deleting ELB without checking target health
+- Skip dependency checks to save API calls
 
 ## Pricing Reference (for individual finding savings only)
 

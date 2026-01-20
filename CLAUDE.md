@@ -190,7 +190,7 @@ This enables:
 Scan all 6 domains simultaneously for faster analysis:
 
 ```
-Scan the AWS account in parallel using the aws-cost-scanner agent:
+Scan the AWS account in parallel using the aws-cost-scanner:aws-cost-scanner agent:
 - Launch 6 agents, one for each domain
 - Domains: compute, storage, database, networking, serverless, reservations
 - Region: us-east-1
@@ -200,7 +200,7 @@ Claude Code will invoke the Task tool 6 times in parallel:
 ```python
 # Internal invocation (automatic)
 Task(
-    subagent_type="aws-cost-scanner",
+    subagent_type="aws-cost-scanner:aws-cost-scanner",
     prompt="Scan the compute domain in us-east-1. Read checks from checks/all_checks.yaml...",
 )
 # ... repeated for each domain
@@ -381,6 +381,18 @@ Mark findings:
 - `approved` if confidence ≥ 70%
 - `needs_validation` if confidence 50-69%
 - `filtered` if confidence < 50%
+
+### Safety Checks (Applied by Subagents)
+
+Each `aws-cost-scanner` subagent applies these checks internally before flagging resources:
+
+1. **Multi-Signal Detection** - idle_score >= 0.60 required
+2. **Batch Detection** - Skip if avg < 15% AND max > 60% AND ratio >= 4
+3. **Dependency Checks** - Skip ASG members, NAT with routes, ELB with targets
+4. **Cost-Tiered Confidence** - HIGH cost (>$100) needs 7+ days and 85% confidence
+5. **Tag Exclusions** - Honor SkipCostOpt=true tag
+
+See `agents/aws-cost-scanner.md` for implementation details.
 
 ### MANDATORY: Price Validation
 

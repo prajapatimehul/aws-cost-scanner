@@ -323,6 +323,54 @@ aws cloudwatch get-metric-statistics \
 3. **Cross-Account Dependencies**: Resources referenced by other accounts
 4. **Compliance-Tagged**: Resources with compliance-related tags
 
+---
+
+## Batch Workload Detection
+
+**CRITICAL**: Batch workloads show low AVERAGE but high PEAK utilization. These are NOT idle.
+
+### Batch Pattern Definition
+
+```
+isBatch = cpuAvg < 15% AND cpuMax > 60% AND (cpuMax / cpuAvg) >= 4
+```
+
+### Examples
+
+| Instance | Avg CPU | Max CPU | Ratio | Classification |
+|----------|---------|---------|-------|----------------|
+| i-abc123 | 5% | 85% | 17x | **BATCH** - skip |
+| i-def456 | 3% | 12% | 4x | Truly idle - flag |
+| i-ghi789 | 25% | 80% | 3.2x | Active - not idle |
+
+### Required Metric Collection
+
+```bash
+# ALWAYS get both Average AND Maximum
+aws cloudwatch get-metric-statistics --namespace AWS/EC2 \
+  --metric-name CPUUtilization --dimensions Name=InstanceId,Value={id} \
+  --start-time {14d_ago} --end-time {now} --period 86400 \
+  --statistics Average Maximum
+```
+
+### When Batch Detected
+
+```json
+{
+  "check_id": "EC2-001",
+  "batch_detection": {
+    "cpu_avg": 5.2,
+    "cpu_max": 87.3,
+    "ratio": 16.8,
+    "is_batch": true
+  },
+  "status": "skipped",
+  "skip_reason": "Batch workload pattern (avg 5.2%, max 87.3%, ratio 16.8x)"
+}
+```
+
+---
+
 ## Review Actions
 
 | Final Confidence | Action | Status |
