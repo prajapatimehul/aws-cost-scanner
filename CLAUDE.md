@@ -104,16 +104,21 @@ Then generate markdown:
 python main.py report --findings findings.json
 ```
 
-## Check Summary (97 Total)
+## Check Summary (163 Total)
 
 | Domain | Checks | Key Checks |
 |--------|--------|------------|
 | **Compute** | 25 | EC2 idle, over-provisioned, GP2→GP3, Graviton |
-| **Storage** | 22 | S3 lifecycle, EBS unattached, snapshots, CloudWatch Logs, CloudTrail |
+| **Storage** | 22 | S3 lifecycle, EBS unattached, snapshots, CloudWatch Logs |
 | **Database** | 15 | RDS idle, over-provisioned, RI coverage |
 | **Networking** | 15 | Unused EIPs, NAT optimization, VPC endpoints |
 | **Serverless** | 10 | Lambda memory, unused functions, ARM64 |
 | **Reservations** | 10 | RI coverage gaps, Savings Plans |
+| **Containers** | 15 | ECS/EKS idle, Fargate optimization, Spot opportunity |
+| **Advanced DBs** | 18 | Aurora, DocumentDB, Neptune, Redshift optimization |
+| **Analytics** | 15 | SageMaker, EMR, OpenSearch, QuickSight |
+| **Data Pipelines** | 12 | Kinesis, MSK, Glue, EventBridge |
+| **Storage Advanced** | 6 | FSx, AWS Backup optimization |
 
 ## Project Structure
 
@@ -286,6 +291,62 @@ aws ce get-reservation-utilization --time-period Start={30d_ago},End={now}
 aws ce get-savings-plans-coverage --time-period Start={30d_ago},End={now}
 aws savingsplans describe-savings-plans
 aws ec2 describe-reserved-instances
+```
+
+### Containers
+```bash
+aws ecs list-clusters
+aws ecs list-services --cluster {cluster_arn}
+aws ecs describe-services --cluster {cluster_arn} --services {service_arn}
+aws ecs list-task-definitions
+aws ecs describe-task-definition --task-definition {task_def}
+aws eks list-clusters
+aws eks list-nodegroups --cluster-name {cluster}
+aws eks describe-nodegroup --cluster-name {cluster} --nodegroup-name {nodegroup}
+```
+
+### Advanced Databases
+```bash
+aws rds describe-db-clusters --filters "Name=engine,Values=aurora-mysql,aurora-postgresql"
+aws docdb describe-db-clusters
+aws docdb describe-db-instances
+aws neptune describe-db-clusters
+aws neptune describe-db-instances
+aws redshift describe-clusters
+aws opensearch list-domain-names
+aws opensearch describe-domain --domain-name {domain}
+```
+
+### Analytics & ML
+```bash
+aws sagemaker list-notebook-instances
+aws sagemaker list-endpoints
+aws sagemaker describe-endpoint --endpoint-name {endpoint}
+aws emr list-clusters --active
+aws emr describe-cluster --cluster-id {id}
+aws emr list-instance-groups --cluster-id {id}
+aws quicksight list-data-sets --aws-account-id {id}
+```
+
+### Data Pipelines
+```bash
+aws kinesis list-streams
+aws kinesis describe-stream-summary --stream-name {stream}
+aws firehose list-delivery-streams
+aws kafka list-clusters
+aws kafka describe-cluster --cluster-arn {arn}
+aws glue list-jobs
+aws glue get-job --name {job}
+aws events list-rules
+aws events list-event-buses
+```
+
+### Storage Advanced
+```bash
+aws fsx describe-file-systems
+aws backup list-backup-plans
+aws backup list-backup-vaults
+aws backup list-recovery-points-by-backup-vault --backup-vault-name {vault}
 ```
 
 ### Metrics (CloudWatch)

@@ -15,8 +15,12 @@ venv/
 reports/
 findings.json
 resources.json
+*_scan_*.json
 *.log
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Growth plans (private)
+growth/

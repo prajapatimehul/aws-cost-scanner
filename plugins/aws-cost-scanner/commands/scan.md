@@ -72,7 +72,7 @@ Store `actual_monthly_spend` in metadata.
 
 ## Step 5: Parallel Domain Scan
 
-Launch 6 `aws-cost-scanner:aws-cost-scanner` subagents **in parallel**:
+Launch 11 `aws-cost-scanner:aws-cost-scanner` subagents **in parallel**:
 
 | Agent | Domain | Checks |
 |-------|--------|--------|
@@ -82,6 +82,11 @@ Launch 6 `aws-cost-scanner:aws-cost-scanner` subagents **in parallel**:
 | 4 | networking | NAT, ELB, VPC endpoints, data transfer |
 | 5 | serverless | Lambda, API Gateway, SQS, Step Functions |
 | 6 | reservations | RI coverage, Savings Plans |
+| 7 | containers | ECS, EKS, Fargate |
+| 8 | advanced_databases | Aurora, DocumentDB, Neptune, Redshift |
+| 9 | analytics | SageMaker, EMR, OpenSearch, QuickSight |
+| 10 | data_pipelines | Kinesis, MSK, Glue, EventBridge |
+| 11 | storage_advanced | FSx, AWS Backup |
 
 Pass to each:
 - `region`: Active region(s)
@@ -90,7 +95,7 @@ Pass to each:
 
 ## Step 6: Merge & Quick Review
 
-Combine all 6 outputs into `reports/findings_{profile}.json`.
+Combine all 11 outputs into `reports/findings_{profile}.json`.
 
 **Quick Review (inline - no scripts):**
 
@@ -141,6 +146,13 @@ Each finding type has a SPECIFIC formula:
 | Idle EC2 | `hourly_rate × 730` |
 | Over-provisioned | `current_cost - recommended_cost` |
 | No RI Coverage | `on_demand_cost × savings_percent` |
+| Idle EKS Cluster | `$72/mo + node_costs` |
+| Idle Fargate Task | `vCPU_hrs × $0.04048 + GB_hrs × $0.004445` |
+| Idle Aurora | `hourly_rate × 730 + storage_gb × $0.10` |
+| Idle Redshift | `node_hourly × nodes × 730` |
+| Idle SageMaker Endpoint | `hourly_rate × 730` |
+| Over-provisioned Kinesis | `shards × $0.015/hr × 730` |
+| Idle MSK Cluster | `broker_cost × brokers` |
 
 ### 6.5.4: Flag & Correct Invalid Findings
 

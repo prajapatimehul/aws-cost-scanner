@@ -1,6 +1,16 @@
 # AWS Cost Scanner
 
-A Claude Code plugin with **97 automated cost optimization checks** across 6 AWS domains.
+Find what's wasting money in your AWS account.
+
+```
+You: "Scan my AWS for cost savings"
+Claude: Found 8 issues. Potential savings: $340/month
+```
+
+A Claude Code plugin that scans EC2, RDS, S3, Lambda, ECS, EKS, Aurora, SageMaker, Kinesis, and 30+ more AWS services.
+
+![60% cost reduction - $105/day to $42/day](public/cost-savings-60-percent.png)
+*Real AWS account: $105/day → $42/day after running the scanner*
 
 ## Prerequisites
 
@@ -41,38 +51,33 @@ export AWS_REGION=us-east-1
 
 ### 3. Required AWS Permissions
 
+**This tool only reads data — it never modifies or deletes anything.**
+
 Your AWS credentials need read access to:
 - EC2 (instances, volumes, snapshots, EIPs)
-- RDS (instances, snapshots)
+- RDS, Aurora, DocumentDB, Neptune (instances, clusters)
 - S3 (buckets, lifecycle)
 - Lambda (functions)
 - CloudWatch (logs, metrics)
 - Cost Explorer (cost and usage data)
 - ElastiCache, EFS, DynamoDB
+- ECS, EKS (clusters, services, tasks)
+- Redshift, OpenSearch (clusters, domains)
+- SageMaker (notebooks, endpoints)
+- Kinesis, MSK, Glue, EventBridge
+- FSx, AWS Backup
 
 Recommended: Use the `ReadOnlyAccess` managed policy or create a custom policy.
 
 ## Installation
 
-### Via Plugin Marketplace (Recommended)
+In Claude Code:
 
-1. Run `/plugin` in Claude Code
-2. Press `Tab` or arrow keys to navigate to **Marketplaces**
-3. Select **+ Add Marketplace**
-4. Enter the GitHub URL:
-   ```
-   git@github.com:prajapatimehul/aws-cost-scanner.git
-   ```
-5. Select `aws-cost-scanner` from the list
-6. Press Enter to install
-
-### Via Command Line (MCP Server Only)
-
-If you only need the AWS MCP server without the full plugin:
-
-```bash
-claude mcp add awslabs-aws-api -- uvx awslabs.aws-mcp-server@latest
 ```
+/plugin → Marketplaces → Add Marketplace → git@github.com:prajapatimehul/aws-cost-scanner.git
+```
+
+Select `aws-cost-scanner` and install. That's it.
 
 ## Quick Start
 
@@ -88,8 +93,8 @@ Scan my AWS account for cost optimization opportunities
 
 ## Features
 
-- **Parallel scanning** - 6 domain agents run simultaneously
-- **97 checks** across compute, storage, database, networking, serverless, and reservations
+- **Parallel scanning** - 11 domain agents run simultaneously
+- **163 checks** across compute, storage, database, networking, serverless, reservations, containers, analytics, and more
 - **Confidence scoring** - filters false positives automatically
 - **Real pricing** - uses AWS Cost Explorer for accurate spend data
 - **Markdown reports** - clean, actionable output
@@ -104,6 +109,11 @@ Scan my AWS account for cost optimization opportunities
 | **Networking** | 15 | Unused EIPs, NAT optimization, VPC endpoints |
 | **Serverless** | 10 | Lambda memory, unused functions |
 | **Reservations** | 10 | RI/Savings Plans coverage gaps |
+| **Containers** | 15 | ECS/EKS idle, Fargate optimization, Spot |
+| **Advanced DBs** | 18 | Aurora, DocumentDB, Neptune, Redshift |
+| **Analytics** | 15 | SageMaker, EMR, OpenSearch, QuickSight |
+| **Data Pipelines** | 12 | Kinesis, MSK, Glue, EventBridge |
+| **Storage Advanced** | 6 | FSx, AWS Backup optimization |
 
 ## Commands & Skills
 

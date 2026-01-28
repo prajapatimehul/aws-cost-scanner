@@ -1,9 +1,9 @@
 # AWS Cost Optimization - Complete Check Registry
-# 97 checks across 6 domains with AWS CLI commands for scanning
+# 150+ checks across 10 domains with AWS CLI commands for scanning
 # Focused on direct cost savings (removed compliance-only checks)
 
-version: "3.0"
-total_checks: 97
+version: "4.0"
+total_checks: 163
 
 # ============================================================================
 # COMPUTE DOMAIN (25 checks)
@@ -1035,6 +1035,767 @@ reservations:
     aws_cli:
       - aws ce get-savings-plans-utilization --time-period Start={30_days_ago},End={now}
     recommendation: Review and optimize Savings Plan usage
+
+# ============================================================================
+# CONTAINERS DOMAIN (15 checks) - ECS, EKS, Fargate
+# ============================================================================
+containers:
+  - id: ECS-001
+    name: Idle ECS Services
+    description: ECS services with desired count = 0 or no running tasks
+    severity: high
+    category: idle
+    aws_cli:
+      - aws ecs list-clusters
+      - aws ecs list-services --cluster {cluster_arn}
+      - aws ecs describe-services --cluster {cluster_arn} --services {service_arn}
+    thresholds:
+      running_tasks: 0
+      days: 7
+    recommendation: Delete idle ECS services
+
+  - id: ECS-002
+    name: Over-provisioned Task Definitions
+    description: ECS tasks with CPU/memory significantly higher than usage
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws ecs list-task-definitions
+      - aws ecs describe-task-definition --task-definition {task_def}
+      - aws cloudwatch get-metric-statistics --namespace AWS/ECS --metric-name CPUUtilization --dimensions Name=ClusterName,Value={cluster} Name=ServiceName,Value={service}
+    thresholds:
+      cpu_utilization_percent: 30
+      memory_utilization_percent: 30
+    recommendation: Reduce task CPU/memory allocation
+
+  - id: ECS-003
+    name: EC2 Capacity Provider Underutilization
+    description: ECS EC2 capacity providers with low instance utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws ecs describe-capacity-providers
+      - aws ecs describe-clusters --clusters {cluster} --include STATISTICS
+    thresholds:
+      utilization_percent: 50
+    recommendation: Reduce capacity provider target capacity or use Fargate
+
+  - id: ECS-004
+    name: Spot Instance Opportunity
+    description: ECS services running on On-Demand that could use Spot
+    severity: medium
+    category: coverage
+    aws_cli:
+      - aws ecs describe-services --cluster {cluster} --services {service}
+      - aws ecs describe-capacity-providers
+    recommendation: Use Fargate Spot or EC2 Spot for fault-tolerant workloads (up to 70% savings)
+
+  - id: ECS-005
+    name: Unused Task Definitions
+    description: Task definition revisions not used in any service
+    severity: low
+    category: lifecycle
+    aws_cli:
+      - aws ecs list-task-definitions
+      - aws ecs list-services --cluster {cluster}
+    thresholds:
+      unused_days: 90
+    recommendation: Deregister unused task definition revisions
+
+  - id: EKS-001
+    name: Idle EKS Clusters
+    description: EKS clusters with no node groups or no running pods
+    severity: high
+    category: idle
+    aws_cli:
+      - aws eks list-clusters
+      - aws eks list-nodegroups --cluster-name {cluster}
+      - aws eks describe-nodegroup --cluster-name {cluster} --nodegroup-name {nodegroup}
+    thresholds:
+      node_count: 0
+    recommendation: Delete idle EKS clusters ($72/month control plane cost)
+
+  - id: EKS-002
+    name: Over-provisioned Node Groups
+    description: EKS node groups with low CPU/memory utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws eks describe-nodegroup --cluster-name {cluster} --nodegroup-name {nodegroup}
+      - aws cloudwatch get-metric-statistics --namespace ContainerInsights --metric-name node_cpu_utilization --dimensions Name=ClusterName,Value={cluster}
+    thresholds:
+      cpu_utilization_percent: 40
+    recommendation: Reduce node group size or use smaller instance types
+
+  - id: EKS-003
+    name: Spot Node Opportunity
+    description: EKS node groups using On-Demand that could use Spot
+    severity: medium
+    category: coverage
+    aws_cli:
+      - aws eks describe-nodegroup --cluster-name {cluster} --nodegroup-name {nodegroup}
+    recommendation: Use Spot instances for non-critical workloads (up to 90% savings)
+
+  - id: EKS-004
+    name: Graviton Node Opportunity
+    description: EKS nodes using x86 that could use Graviton (ARM64)
+    severity: medium
+    category: previous_generation
+    aws_cli:
+      - aws eks describe-nodegroup --cluster-name {cluster} --nodegroup-name {nodegroup}
+    recommendation: Migrate to Graviton-based instances for 20-40% savings
+
+  - id: EKS-005
+    name: Add-ons Cost Review
+    description: EKS add-ons that may have cost implications
+    severity: low
+    category: overprovisioned
+    aws_cli:
+      - aws eks list-addons --cluster-name {cluster}
+      - aws eks describe-addon --cluster-name {cluster} --addon-name {addon}
+    recommendation: Review add-on necessity and configuration
+
+  - id: FARGATE-001
+    name: Over-provisioned Fargate Tasks
+    description: Fargate tasks with excessive vCPU/memory allocation
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws ecs list-tasks --cluster {cluster} --launch-type FARGATE
+      - aws ecs describe-tasks --cluster {cluster} --tasks {task_arns}
+      - aws cloudwatch get-metric-statistics --namespace AWS/ECS --metric-name MemoryUtilization
+    thresholds:
+      memory_utilization_percent: 40
+      cpu_utilization_percent: 40
+    recommendation: Reduce Fargate task CPU/memory allocation
+
+  - id: FARGATE-002
+    name: Fargate Spot Opportunity
+    description: Fargate tasks that could use Fargate Spot
+    severity: medium
+    category: coverage
+    aws_cli:
+      - aws ecs describe-services --cluster {cluster} --services {service}
+    recommendation: Use Fargate Spot for fault-tolerant workloads (up to 70% savings)
+
+  - id: FARGATE-003
+    name: Fargate vs EC2 Comparison
+    description: Fargate tasks that might be cheaper on EC2
+    severity: low
+    category: overprovisioned
+    aws_cli:
+      - aws ecs list-tasks --cluster {cluster} --launch-type FARGATE
+      - aws ecs describe-tasks --cluster {cluster} --tasks {task_arns}
+    recommendation: Compare Fargate vs EC2 costs for long-running, predictable workloads
+
+  - id: FARGATE-004
+    name: Ephemeral Storage Optimization
+    description: Fargate tasks with excessive ephemeral storage
+    severity: low
+    category: overprovisioned
+    aws_cli:
+      - aws ecs describe-task-definition --task-definition {task_def}
+    thresholds:
+      storage_gb: 21
+    recommendation: Reduce ephemeral storage if not needed (charged above 20GB)
+
+  - id: FARGATE-005
+    name: Compute Savings Plan Coverage
+    description: Fargate usage without Savings Plan coverage
+    severity: high
+    category: coverage
+    aws_cli:
+      - aws ce get-savings-plans-coverage --time-period Start={30_days_ago},End={now} --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Elastic Container Service"]}}'
+    recommendation: Purchase Compute Savings Plans for steady Fargate usage
+
+# ============================================================================
+# ADVANCED DATABASES DOMAIN (18 checks) - Aurora, DocumentDB, Neptune, Redshift
+# ============================================================================
+advanced_databases:
+  - id: AURORA-001
+    name: Idle Aurora Clusters
+    description: Aurora clusters with no connections for extended period
+    severity: high
+    category: idle
+    aws_cli:
+      - aws rds describe-db-clusters --filters "Name=engine,Values=aurora-mysql,aurora-postgresql"
+      - aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name DatabaseConnections --dimensions Name=DBClusterIdentifier,Value={cluster_id}
+    thresholds:
+      connections: 0
+      days: 7
+    recommendation: Stop or delete idle Aurora clusters
+
+  - id: AURORA-002
+    name: Over-provisioned Aurora Instances
+    description: Aurora instances with low CPU utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws rds describe-db-instances --filters "Name=engine,Values=aurora-mysql,aurora-postgresql"
+      - aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name CPUUtilization --dimensions Name=DBInstanceIdentifier,Value={instance_id}
+    thresholds:
+      cpu_percent: 30
+    recommendation: Downsize Aurora instances or use Aurora Serverless
+
+  - id: AURORA-003
+    name: Aurora Serverless v2 Opportunity
+    description: Provisioned Aurora that could benefit from Serverless v2
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws rds describe-db-clusters --filters "Name=engine,Values=aurora-mysql,aurora-postgresql"
+      - aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name CPUUtilization
+    recommendation: Consider Aurora Serverless v2 for variable workloads
+
+  - id: AURORA-004
+    name: Excessive Read Replicas
+    description: Aurora read replicas with minimal traffic
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws rds describe-db-clusters
+      - aws rds describe-db-instances
+      - aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name ReadIOPS
+    thresholds:
+      read_iops: 100
+    recommendation: Remove underutilized read replicas
+
+  - id: AURORA-005
+    name: Aurora I/O Optimization
+    description: Aurora clusters that could benefit from I/O-Optimized
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws rds describe-db-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/RDS --metric-name VolumeReadIOPs
+    thresholds:
+      io_cost_percent: 25
+    recommendation: Switch to Aurora I/O-Optimized if I/O > 25% of database cost
+
+  - id: AURORA-006
+    name: Cross-Region Aurora Replication
+    description: Aurora Global Database with high replication costs
+    severity: medium
+    category: data_transfer
+    aws_cli:
+      - aws rds describe-global-clusters
+    recommendation: Review necessity of cross-region replication
+
+  - id: DOCDB-001
+    name: Idle DocumentDB Clusters
+    description: DocumentDB clusters with no connections
+    severity: high
+    category: idle
+    aws_cli:
+      - aws docdb describe-db-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/DocDB --metric-name DatabaseConnections
+    thresholds:
+      connections: 0
+      days: 7
+    recommendation: Stop or delete idle DocumentDB clusters
+
+  - id: DOCDB-002
+    name: Over-provisioned DocumentDB
+    description: DocumentDB instances with low CPU utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws docdb describe-db-instances
+      - aws cloudwatch get-metric-statistics --namespace AWS/DocDB --metric-name CPUUtilization
+    thresholds:
+      cpu_percent: 30
+    recommendation: Downsize DocumentDB instance class
+
+  - id: DOCDB-003
+    name: Excessive DocumentDB Replicas
+    description: DocumentDB replicas with minimal read traffic
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws docdb describe-db-clusters
+      - aws docdb describe-db-instances
+    recommendation: Remove underutilized replicas
+
+  - id: NEPTUNE-001
+    name: Idle Neptune Clusters
+    description: Neptune clusters with no queries
+    severity: high
+    category: idle
+    aws_cli:
+      - aws neptune describe-db-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/Neptune --metric-name GremlinRequestsPerSec
+    thresholds:
+      requests: 0
+      days: 7
+    recommendation: Stop or delete idle Neptune clusters
+
+  - id: NEPTUNE-002
+    name: Over-provisioned Neptune
+    description: Neptune instances with low CPU utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws neptune describe-db-instances
+      - aws cloudwatch get-metric-statistics --namespace AWS/Neptune --metric-name CPUUtilization
+    thresholds:
+      cpu_percent: 30
+    recommendation: Downsize Neptune instance class
+
+  - id: NEPTUNE-003
+    name: Neptune Serverless Opportunity
+    description: Neptune provisioned that could use Serverless
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws neptune describe-db-clusters
+    recommendation: Consider Neptune Serverless for variable workloads
+
+  - id: REDSHIFT-001
+    name: Idle Redshift Clusters
+    description: Redshift clusters with no queries
+    severity: high
+    category: idle
+    aws_cli:
+      - aws redshift describe-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/Redshift --metric-name DatabaseConnections
+    thresholds:
+      connections: 0
+      days: 7
+    recommendation: Pause or delete idle Redshift clusters
+
+  - id: REDSHIFT-002
+    name: Over-provisioned Redshift Nodes
+    description: Redshift clusters with low CPU utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws redshift describe-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/Redshift --metric-name CPUUtilization
+    thresholds:
+      cpu_percent: 30
+    recommendation: Reduce node count or downsize node type
+
+  - id: REDSHIFT-003
+    name: Redshift RA3 Migration
+    description: DC2 clusters that should migrate to RA3
+    severity: medium
+    category: previous_generation
+    aws_cli:
+      - aws redshift describe-clusters
+    node_types_to_migrate: [dc2.large, dc2.8xlarge, ds2.xlarge, ds2.8xlarge]
+    recommendation: Migrate to RA3 for managed storage and better price/performance
+
+  - id: REDSHIFT-004
+    name: Redshift Serverless Opportunity
+    description: Provisioned Redshift that could use Serverless
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws redshift describe-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/Redshift --metric-name CPUUtilization
+    recommendation: Consider Redshift Serverless for variable workloads
+
+  - id: REDSHIFT-005
+    name: Concurrency Scaling Costs
+    description: High concurrency scaling usage and costs
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws redshift describe-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/Redshift --metric-name ConcurrencyScalingSeconds
+    thresholds:
+      scaling_seconds_per_day: 3600
+    recommendation: Review concurrency scaling configuration
+
+  - id: REDSHIFT-006
+    name: Redshift Spectrum Review
+    description: Redshift Spectrum with high data scanning costs
+    severity: medium
+    category: data_transfer
+    aws_cli:
+      - aws ce get-cost-and-usage --time-period Start={30_days_ago},End={now} --filter '{"Dimensions":{"Key":"USAGE_TYPE","Values":["Spectrum"]}}'
+    recommendation: Optimize Spectrum queries or move frequently queried data to cluster
+
+# ============================================================================
+# ANALYTICS & ML DOMAIN (15 checks) - SageMaker, EMR, OpenSearch, QuickSight
+# ============================================================================
+analytics:
+  - id: SAGEMAKER-001
+    name: Idle Notebook Instances
+    description: SageMaker notebook instances in 'InService' with no activity
+    severity: high
+    category: idle
+    aws_cli:
+      - aws sagemaker list-notebook-instances
+      - aws sagemaker describe-notebook-instance --notebook-instance-name {name}
+    thresholds:
+      days_without_activity: 7
+    recommendation: Stop or delete idle notebook instances
+
+  - id: SAGEMAKER-002
+    name: Over-provisioned Notebooks
+    description: Notebook instances with larger instance type than needed
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws sagemaker list-notebook-instances
+      - aws sagemaker describe-notebook-instance --notebook-instance-name {name}
+    recommendation: Downsize notebook instance type (ml.t3.medium often sufficient)
+
+  - id: SAGEMAKER-003
+    name: Unused Endpoints
+    description: SageMaker endpoints with no invocations
+    severity: high
+    category: idle
+    aws_cli:
+      - aws sagemaker list-endpoints
+      - aws cloudwatch get-metric-statistics --namespace AWS/SageMaker --metric-name Invocations --dimensions Name=EndpointName,Value={endpoint}
+    thresholds:
+      days_without_invocations: 7
+    recommendation: Delete unused SageMaker endpoints
+
+  - id: SAGEMAKER-004
+    name: Over-provisioned Endpoints
+    description: SageMaker endpoints with low utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws sagemaker describe-endpoint --endpoint-name {endpoint}
+      - aws cloudwatch get-metric-statistics --namespace AWS/SageMaker --metric-name CPUUtilization
+    thresholds:
+      cpu_utilization_percent: 30
+    recommendation: Reduce endpoint instance count or use smaller instance type
+
+  - id: SAGEMAKER-005
+    name: Serverless Inference Opportunity
+    description: Endpoints that could use Serverless Inference
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws sagemaker list-endpoints
+      - aws cloudwatch get-metric-statistics --namespace AWS/SageMaker --metric-name Invocations
+    recommendation: Consider Serverless Inference for infrequent, unpredictable traffic
+
+  - id: EMR-001
+    name: Idle EMR Clusters
+    description: EMR clusters running with no active steps
+    severity: high
+    category: idle
+    aws_cli:
+      - aws emr list-clusters --active
+      - aws emr describe-cluster --cluster-id {cluster_id}
+      - aws emr list-steps --cluster-id {cluster_id}
+    thresholds:
+      hours_without_steps: 24
+    recommendation: Terminate idle EMR clusters or use auto-termination
+
+  - id: EMR-002
+    name: Over-provisioned Core Nodes
+    description: EMR clusters with underutilized core nodes
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws emr list-instance-groups --cluster-id {cluster_id}
+      - aws cloudwatch get-metric-statistics --namespace AWS/ElasticMapReduce --metric-name YARNMemoryAvailablePercentage
+    thresholds:
+      memory_available_percent: 60
+    recommendation: Reduce core node count or use smaller instance types
+
+  - id: EMR-003
+    name: Spot Instance Opportunity
+    description: EMR task nodes using On-Demand that could use Spot
+    severity: medium
+    category: coverage
+    aws_cli:
+      - aws emr list-instance-groups --cluster-id {cluster_id}
+    recommendation: Use Spot instances for task nodes (up to 90% savings)
+
+  - id: EMR-004
+    name: Auto-termination Not Enabled
+    description: Long-running EMR clusters without auto-termination
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws emr describe-cluster --cluster-id {cluster_id}
+    recommendation: Enable auto-termination for transient workloads
+
+  - id: OPENSEARCH-001
+    name: Idle OpenSearch Domains
+    description: OpenSearch domains with no search requests
+    severity: high
+    category: idle
+    aws_cli:
+      - aws opensearch list-domain-names
+      - aws cloudwatch get-metric-statistics --namespace AWS/ES --metric-name SearchableDocuments
+    thresholds:
+      days_without_requests: 14
+    recommendation: Delete idle OpenSearch domains
+
+  - id: OPENSEARCH-002
+    name: Over-provisioned OpenSearch
+    description: OpenSearch domains with low CPU/memory utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws opensearch describe-domain --domain-name {domain}
+      - aws cloudwatch get-metric-statistics --namespace AWS/ES --metric-name CPUUtilization
+    thresholds:
+      cpu_percent: 30
+    recommendation: Reduce node count or downsize instance type
+
+  - id: OPENSEARCH-003
+    name: UltraWarm Opportunity
+    description: OpenSearch with infrequently accessed indexes
+    severity: medium
+    category: lifecycle
+    aws_cli:
+      - aws opensearch describe-domain --domain-name {domain}
+    recommendation: Move cold indexes to UltraWarm for up to 90% savings
+
+  - id: OPENSEARCH-004
+    name: Serverless Opportunity
+    description: OpenSearch that could use Serverless
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws opensearch list-domain-names
+      - aws opensearchserverless list-collections
+    recommendation: Consider OpenSearch Serverless for variable workloads
+
+  - id: QUICKSIGHT-001
+    name: Unused SPICE Capacity
+    description: QuickSight SPICE capacity not being utilized
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws quicksight describe-account-settings --aws-account-id {account_id}
+      - aws quicksight list-data-sets --aws-account-id {account_id}
+    recommendation: Reduce SPICE capacity or delete unused datasets
+
+  - id: QUICKSIGHT-002
+    name: Inactive Users
+    description: QuickSight users with no recent activity
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws quicksight list-users --aws-account-id {account_id} --namespace default
+    thresholds:
+      days_inactive: 90
+    recommendation: Remove inactive QuickSight users
+
+# ============================================================================
+# DATA PIPELINES DOMAIN (12 checks) - Kinesis, MSK, Glue, EventBridge
+# ============================================================================
+data_pipelines:
+  - id: KINESIS-001
+    name: Over-provisioned Kinesis Shards
+    description: Kinesis streams with low shard utilization
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws kinesis list-streams
+      - aws kinesis describe-stream-summary --stream-name {stream}
+      - aws cloudwatch get-metric-statistics --namespace AWS/Kinesis --metric-name IncomingBytes
+    thresholds:
+      shard_utilization_percent: 30
+    recommendation: Reduce shard count or use On-Demand mode
+
+  - id: KINESIS-002
+    name: Idle Kinesis Streams
+    description: Kinesis streams with no incoming data
+    severity: high
+    category: idle
+    aws_cli:
+      - aws kinesis list-streams
+      - aws cloudwatch get-metric-statistics --namespace AWS/Kinesis --metric-name IncomingRecords
+    thresholds:
+      days_without_records: 14
+    recommendation: Delete idle Kinesis streams
+
+  - id: KINESIS-003
+    name: On-Demand Mode Opportunity
+    description: Provisioned streams with variable throughput
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws kinesis describe-stream-summary --stream-name {stream}
+      - aws cloudwatch get-metric-statistics --namespace AWS/Kinesis --metric-name IncomingBytes
+    recommendation: Switch to On-Demand mode for variable workloads
+
+  - id: KINESIS-004
+    name: Extended Retention Cost
+    description: Kinesis streams with extended retention enabled
+    severity: low
+    category: lifecycle
+    aws_cli:
+      - aws kinesis describe-stream-summary --stream-name {stream}
+    thresholds:
+      retention_hours: 24
+    recommendation: Review necessity of extended retention ($0.02/shard-hour)
+
+  - id: FIREHOSE-001
+    name: Idle Firehose Streams
+    description: Kinesis Firehose delivery streams with no data
+    severity: high
+    category: idle
+    aws_cli:
+      - aws firehose list-delivery-streams
+      - aws cloudwatch get-metric-statistics --namespace AWS/Firehose --metric-name IncomingBytes
+    thresholds:
+      days_without_data: 14
+    recommendation: Delete idle Firehose delivery streams
+
+  - id: MSK-001
+    name: Idle MSK Clusters
+    description: MSK clusters with minimal message throughput
+    severity: high
+    category: idle
+    aws_cli:
+      - aws kafka list-clusters
+      - aws cloudwatch get-metric-statistics --namespace AWS/Kafka --metric-name BytesInPerSec
+    thresholds:
+      bytes_per_sec: 1000
+      days: 7
+    recommendation: Delete idle MSK clusters
+
+  - id: MSK-002
+    name: Over-provisioned MSK Brokers
+    description: MSK clusters with oversized broker instances
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws kafka describe-cluster --cluster-arn {arn}
+      - aws cloudwatch get-metric-statistics --namespace AWS/Kafka --metric-name CpuUser
+    thresholds:
+      cpu_percent: 30
+    recommendation: Downsize broker instance type
+
+  - id: MSK-003
+    name: MSK Serverless Opportunity
+    description: MSK provisioned that could use Serverless
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws kafka list-clusters
+      - aws kafka list-clusters-v2
+    recommendation: Consider MSK Serverless for variable workloads
+
+  - id: GLUE-001
+    name: Idle Glue Jobs
+    description: Glue jobs that haven't run in extended period
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws glue list-jobs
+      - aws glue get-job-runs --job-name {job}
+    thresholds:
+      days_since_last_run: 30
+    recommendation: Delete idle Glue jobs
+
+  - id: GLUE-002
+    name: Over-provisioned Glue DPUs
+    description: Glue jobs with excessive DPU allocation
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws glue get-job --name {job}
+      - aws glue get-job-runs --job-name {job}
+    recommendation: Right-size DPU allocation based on job metrics
+
+  - id: EVENTBRIDGE-001
+    name: Unused EventBridge Rules
+    description: EventBridge rules with no invocations
+    severity: medium
+    category: idle
+    aws_cli:
+      - aws events list-rules
+      - aws cloudwatch get-metric-statistics --namespace AWS/Events --metric-name Invocations --dimensions Name=RuleName,Value={rule}
+    thresholds:
+      days_without_invocations: 30
+    recommendation: Delete unused EventBridge rules
+
+  - id: EVENTBRIDGE-002
+    name: Unused Event Buses
+    description: Custom event buses with no events
+    severity: low
+    category: idle
+    aws_cli:
+      - aws events list-event-buses
+      - aws events list-rules --event-bus-name {bus}
+    thresholds:
+      days_without_events: 30
+    recommendation: Delete unused custom event buses
+
+# ============================================================================
+# STORAGE EXPANSION (6 checks) - FSx, Backup
+# ============================================================================
+storage_advanced:
+  - id: FSX-001
+    name: Idle FSx File Systems
+    description: FSx file systems with no I/O activity
+    severity: high
+    category: idle
+    aws_cli:
+      - aws fsx describe-file-systems
+      - aws cloudwatch get-metric-statistics --namespace AWS/FSx --metric-name DataReadBytes
+    thresholds:
+      days_without_io: 14
+    recommendation: Delete idle FSx file systems
+
+  - id: FSX-002
+    name: Over-provisioned FSx Throughput
+    description: FSx with provisioned throughput significantly above usage
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws fsx describe-file-systems
+      - aws cloudwatch get-metric-statistics --namespace AWS/FSx --metric-name ThroughputUtilization
+    thresholds:
+      utilization_percent: 30
+    recommendation: Reduce provisioned throughput
+
+  - id: FSX-003
+    name: FSx Storage Optimization
+    description: FSx with excessive storage allocation
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws fsx describe-file-systems
+      - aws cloudwatch get-metric-statistics --namespace AWS/FSx --metric-name StorageUsed
+    thresholds:
+      storage_utilization_percent: 30
+    recommendation: Resize storage or enable data deduplication
+
+  - id: BACKUP-001
+    name: Redundant Backup Rules
+    description: Resources backed up by multiple backup plans
+    severity: medium
+    category: overprovisioned
+    aws_cli:
+      - aws backup list-backup-plans
+      - aws backup list-backup-selections --backup-plan-id {plan_id}
+    recommendation: Consolidate backup rules to avoid redundancy
+
+  - id: BACKUP-002
+    name: Excessive Backup Retention
+    description: Backup vaults with very long retention periods
+    severity: low
+    category: lifecycle
+    aws_cli:
+      - aws backup list-backup-vaults
+      - aws backup get-backup-vault-access-policy --backup-vault-name {vault}
+    thresholds:
+      retention_days: 365
+    recommendation: Review backup retention requirements
+
+  - id: BACKUP-003
+    name: Cross-Region Backup Review
+    description: Cross-region backup copies with high costs
+    severity: medium
+    category: data_transfer
+    aws_cli:
+      - aws backup list-copy-jobs
+    recommendation: Review necessity of cross-region backup copies
 
 # ============================================================================
 # REMOVED: Tags domain (compliance-focused, not direct cost savings)

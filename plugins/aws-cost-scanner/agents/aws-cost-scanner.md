@@ -1,6 +1,6 @@
 ---
 name: aws-cost-scanner
-description: AWS cost optimization scanner. Analyzes AWS resources for cost savings. Use when scanning AWS accounts or analyzing domains (compute, storage, database, networking, serverless, reservations).
+description: AWS cost optimization scanner. Analyzes AWS resources for cost savings. Use when scanning AWS accounts or analyzing domains (compute, storage, database, networking, serverless, reservations, containers, advanced_databases, analytics, data_pipelines, storage_advanced).
 tools: Read, Write, Grep, Glob, mcp__awslabs-aws-api__call_aws
 model: inherit
 ---
@@ -11,12 +11,12 @@ Scan ONE domain for cost optimization findings.
 
 ## Input
 
-- `domain`: compute | storage | database | networking | serverless | reservations
+- `domain`: compute | storage | database | networking | serverless | reservations | containers | advanced_databases | analytics | data_pipelines | storage_advanced
 - `region`: AWS region to scan
 - `compliance`: [HIPAA, SOC2, PCI-DSS] or empty
 - `profile`: AWS profile name
 
-## 6 Domains (97 checks total)
+## 11 Domains (163 checks total)
 
 | Domain | Checks | Resources |
 |--------|--------|-----------|
@@ -26,6 +26,11 @@ Scan ONE domain for cost optimization findings.
 | networking | 15 | NAT, ELB, VPC endpoints, data transfer |
 | serverless | 10 | Lambda, API Gateway, SQS, Step Functions |
 | reservations | 10 | RI coverage, Savings Plans |
+| containers | 15 | ECS, EKS, Fargate |
+| advanced_databases | 18 | Aurora, DocumentDB, Neptune, Redshift |
+| analytics | 15 | SageMaker, EMR, OpenSearch, QuickSight |
+| data_pipelines | 12 | Kinesis, MSK, Glue, EventBridge |
+| storage_advanced | 6 | FSx, AWS Backup |
 
 ## Workflow
 
@@ -147,6 +152,40 @@ Resources with `SkipCostOpt=true` are **excluded from ALL checks**.
 - `reserved_instances`: EC2 RIs
 - `reserved_db_instances`: RDS RIs
 - `savings_plans`: Active plans
+
+### containers
+- `ecs_clusters`: All ECS clusters
+- `ecs_services`: Services per cluster
+- `ecs_task_definitions`: Task definitions
+- `eks_clusters`: All EKS clusters
+- `eks_nodegroups`: Node groups per cluster
+- `fargate_tasks`: Fargate tasks
+
+### advanced_databases
+- `aurora_clusters`: Aurora DB clusters
+- `aurora_instances`: Aurora instances
+- `documentdb_clusters`: DocumentDB clusters
+- `neptune_clusters`: Neptune clusters
+- `redshift_clusters`: Redshift clusters
+
+### analytics
+- `sagemaker_notebooks`: Notebook instances
+- `sagemaker_endpoints`: Inference endpoints
+- `emr_clusters`: Active EMR clusters
+- `opensearch_domains`: OpenSearch domains
+- `quicksight_datasets`: QuickSight datasets
+
+### data_pipelines
+- `kinesis_streams`: Data streams
+- `firehose_streams`: Firehose delivery streams
+- `msk_clusters`: MSK Kafka clusters
+- `glue_jobs`: Glue ETL jobs
+- `eventbridge_rules`: EventBridge rules
+
+### storage_advanced
+- `fsx_filesystems`: FSx file systems
+- `backup_plans`: AWS Backup plans
+- `backup_vaults`: Backup vaults
 
 ## Cost-Tiered Confidence
 
@@ -288,6 +327,16 @@ Use these for estimating `monthly_savings` on individual findings.
 | EIP (unattached) | $3.65 |
 | CW Logs Storage | $0.03/GB-month |
 | CW Logs Ingestion | $0.50/GB (NOT recurring) |
+| EKS Cluster | $72.00 (control plane) |
+| Fargate vCPU/hr | $0.04048 |
+| Fargate GB/hr | $0.004445 |
+| Aurora r6g.large | $187.25 |
+| Redshift dc2.large | $183.96 |
+| OpenSearch m6g.large | $134.32 |
+| SageMaker ml.t3.medium | $30.37 |
+| Kinesis shard/hr | $0.015 |
+| MSK kafka.m5.large | $154.00 |
+| FSx Lustre/GB | $0.145 |
 
 ---
 
