@@ -12,6 +12,16 @@ A Claude Code plugin that scans EC2, RDS, S3, Lambda, ECS, EKS, Aurora, SageMake
 ![60% cost reduction - $105/day to $42/day](public/cost-savings-60-percent.png)
 *Real AWS account: $105/day → $42/day after running the scanner*
 
+### How it works
+
+**Step 1:** Choose compliance requirements
+
+![Scan step 1 - Compliance selection](public/scan-step-1.png)
+
+**Step 2:** 6 parallel agents scan your account
+
+![Scan step 2 - Parallel domain scanning](public/step-2-process.png)
+
 ## Prerequisites
 
 Before installing this plugin, you need:
