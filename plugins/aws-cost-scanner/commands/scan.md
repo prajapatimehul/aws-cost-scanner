@@ -5,6 +5,28 @@ allowed-tools: Read, Task, Write, Bash, Glob, Grep, AskUserQuestion, mcp__awslab
 
 # AWS Cost Optimization Scan
 
+## Step 0: Ask for AWS Profile
+
+First, ask the user which AWS profile to use:
+
+```json
+{
+  "questions": [{
+    "header": "AWS Profile",
+    "question": "Which AWS profile should I use for the scan?",
+    "multiSelect": false,
+    "options": [
+      {"label": "default", "description": "Use default AWS credentials"},
+      {"label": "Enter profile name", "description": "I'll type my profile name"}
+    ]
+  }]
+}
+```
+
+If user selects "Enter profile name" or "Other", ask them to type the profile name.
+
+Store the profile name for all subsequent AWS commands.
+
 **Authentication:** AWS commands work with any valid AWS credentials:
 - SSO profile: `--profile your-sso-profile`
 - Named profile: `--profile your-profile`
