@@ -100,6 +100,22 @@ CHECK_ID_ROUTING = {
     "NET-002": "network",     # NAT Gateway optimization
     "NET-003": "network",     # VPC Endpoints missing
     "NET-004": "network",     # Cross-AZ data transfer
+    "NET-016": "network",     # NAT Gateway Data Processing
+    "NET-017": "network",     # Data Transfer Cost Breakdown
+    "R53-001": "network",     # Unused Route 53 Hosted Zones
+
+    # New service checks
+    "CT-001": "cloudwatch",   # CloudTrail data event costs
+    "SECRETS-001": "misc",    # Unused Secrets Manager secrets
+    "ECR-001": "misc",        # ECR image lifecycle
+
+    # Compute Optimizer checks (use CO-provided savings)
+    "EC2-026": "ec2",         # CO Idle Detection
+    "EC2-027": "ec2",         # Memory utilization check
+
+    # Reservation purchase recommendations (use AWS-provided savings)
+    "RI-007": "reservations", # RI Purchase Recommendation
+    "SP-005": "reservations", # SP Purchase Recommendation
 }
 
 # Map service domain to Cost Explorer service name
@@ -112,6 +128,8 @@ DOMAIN_TO_CE_SERVICE = {
     "lambda": "AWS Lambda",
     "s3": "Amazon Simple Storage Service",
     "network": "Amazon Elastic Compute Cloud - Compute",
+    "misc": None,          # Mixed services - skip CE sanity check
+    "reservations": None,  # AWS-provided recommendations - trust the savings estimate
 }
 
 
@@ -522,6 +540,43 @@ def calculate_network_savings(finding: dict, profile: str, use_api: bool = False
     return finding.get("monthly_savings", 0), {"source": "original estimate"}
 
 
+def calculate_misc_savings(finding: dict, profile: str, use_api: bool = False) -> tuple[float, dict]:
+    """Calculate savings for misc service findings (Secrets Manager, ECR, etc.)."""
+    check_id = finding.get("check_id", "")
+
+    # SECRETS-001: Unused secrets - $0.40/secret/month
+    if check_id == "SECRETS-001":
+        count = finding.get("details", {}).get("secret_count", 1)
+        savings = count * 0.40
+        return round(savings, 2), {
+            "source": "fixed rate",
+            "calculation": f"{count} secrets × $0.40/secret/month"
+        }
+
+    # ECR-001: ECR lifecycle - estimate based on storage
+    if check_id == "ECR-001":
+        storage_gb = finding.get("details", {}).get("untagged_image_size_gb", 0)
+        savings = storage_gb * 0.10  # $0.10/GB for ECR storage
+        return round(savings, 2), {
+            "source": "fallback estimate",
+            "calculation": f"{storage_gb} GB × $0.10/GB ECR storage"
+        }
+
+    return finding.get("monthly_savings", 0), {"source": "original estimate"}
+
+
+def calculate_reservation_savings(finding: dict, profile: str, use_api: bool = False) -> tuple[float, dict]:
+    """Calculate savings for reservation purchase recommendations.
+
+    These come from AWS CE APIs which already provide savings estimates.
+    Trust the AWS-provided number.
+    """
+    return finding.get("monthly_savings", 0), {
+        "source": "AWS Cost Explorer recommendation",
+        "note": "Savings estimate provided by AWS, not calculated locally"
+    }
+
+
 # Calculator dispatch table (maps service domain to calculator function)
 CALCULATOR_DISPATCH = {
     "ec2": calculate_ec2_savings,
@@ -532,6 +587,8 @@ CALCULATOR_DISPATCH = {
     "lambda": calculate_lambda_savings,
     "s3": calculate_s3_savings,
     "network": calculate_network_savings,
+    "misc": calculate_misc_savings,
+    "reservations": calculate_reservation_savings,
 }
 
 

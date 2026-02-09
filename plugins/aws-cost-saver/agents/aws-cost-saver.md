@@ -1,6 +1,6 @@
 ---
 name: aws-cost-saver
-description: AWS cost optimization scanner. Analyzes AWS resources for cost savings. Use when scanning AWS accounts or analyzing domains (compute, storage, database, networking, serverless, reservations, containers, advanced_databases, analytics, data_pipelines, storage_advanced).
+description: AWS cost optimization scanner with Compute Optimizer ML integration, data transfer analysis, and 173 checks. Use when scanning AWS accounts or analyzing domains (compute, storage, database, networking, serverless, reservations, containers, advanced_databases, analytics, data_pipelines, storage_advanced).
 tools: Read, Write, Grep, Glob, mcp__awslabs-aws-api__call_aws
 model: inherit
 ---
@@ -16,17 +16,17 @@ Scan ONE domain for cost optimization findings.
 - `compliance`: [HIPAA, SOC2, PCI-DSS] or empty
 - `profile`: AWS profile name
 
-## 11 Domains (163 checks total)
+## 11 Domains (173 checks total)
 
 | Domain | Checks | Resources |
 |--------|--------|-----------|
-| compute | 25 | EC2, EBS, AMIs, snapshots, EIPs |
-| storage | 22 | S3, EFS, CloudWatch Logs, CloudTrail |
+| compute | 27 | EC2, EBS, AMIs, snapshots, EIPs, Compute Optimizer |
+| storage | 24 | S3, EFS, CloudWatch Logs, CloudTrail, Secrets Manager |
 | database | 15 | RDS, DynamoDB, ElastiCache |
-| networking | 15 | NAT, ELB, VPC endpoints, data transfer |
+| networking | 18 | NAT, ELB, VPC endpoints, data transfer, Route 53 |
 | serverless | 10 | Lambda, API Gateway, SQS, Step Functions |
-| reservations | 10 | RI coverage, Savings Plans |
-| containers | 15 | ECS, EKS, Fargate |
+| reservations | 12 | RI coverage, Savings Plans, purchase recommendations |
+| containers | 16 | ECS, EKS, Fargate, ECR |
 | advanced_databases | 18 | Aurora, DocumentDB, Neptune, Redshift |
 | analytics | 15 | SageMaker, EMR, OpenSearch, QuickSight |
 | data_pipelines | 12 | Kinesis, MSK, Glue, EventBridge |
@@ -124,12 +124,15 @@ Resources with `SkipCostOpt=true` are **excluded from ALL checks**.
 - `elastic_ips`: All EIPs
 - `snapshots`: Account snapshots
 - `amis`: Account AMIs
+- `compute_optimizer_status`: Enrollment status (Active/Inactive)
+- `compute_optimizer_recommendations`: CO recommendations (if enrolled)
 
 ### storage
 - `s3_buckets`: All buckets
 - `efs_filesystems`: All EFS
 - `cloudwatch_log_groups`: All log groups with retention
 - `cloudtrail_trails`: All trails
+- `secrets`: Secrets Manager secrets (with last accessed date)
 
 ### database
 - `rds_instances`: All RDS
@@ -141,6 +144,8 @@ Resources with `SkipCostOpt=true` are **excluded from ALL checks**.
 - `nat_gateways`: All NAT gateways
 - `load_balancers`: ALBs/NLBs
 - `vpc_endpoints`: All endpoints
+- `data_transfer_costs`: USAGE_TYPE breakdown from Cost Explorer
+- `route53_zones`: Hosted zones with record counts
 
 ### serverless
 - `lambda_functions`: All functions
@@ -152,6 +157,8 @@ Resources with `SkipCostOpt=true` are **excluded from ALL checks**.
 - `reserved_instances`: EC2 RIs
 - `reserved_db_instances`: RDS RIs
 - `savings_plans`: Active plans
+- `ri_purchase_recommendations`: AWS-generated RI recommendations
+- `sp_purchase_recommendations`: AWS-generated SP recommendations
 
 ### containers
 - `ecs_clusters`: All ECS clusters
@@ -160,6 +167,7 @@ Resources with `SkipCostOpt=true` are **excluded from ALL checks**.
 - `eks_clusters`: All EKS clusters
 - `eks_nodegroups`: Node groups per cluster
 - `fargate_tasks`: Fargate tasks
+- `ecr_repositories`: ECR repos with lifecycle policy status
 
 ### advanced_databases
 - `aurora_clusters`: Aurora DB clusters
@@ -270,6 +278,148 @@ aws cloudwatch get-metric-statistics --namespace AWS/EC2 \
   }
 }
 ```
+
+---
+
+## AWS Compute Optimizer Integration (FREE)
+
+**Use Compute Optimizer as PRIMARY signal for rightsizing and idle detection.** Falls back to CloudWatch thresholds if CO is not enabled.
+
+### Step 1: Check Enrollment
+
+```bash
+aws compute-optimizer get-enrollment-status
+```
+
+If status is `Active`, use CO recommendations. If `Inactive`, fall back to manual CloudWatch analysis.
+
+### Step 2: ML-Powered Rightsizing (EC2-024)
+
+```bash
+aws compute-optimizer get-ec2-instance-recommendations
+```
+
+Returns recommendations with:
+- `finding`: UNDER_PROVISIONED, OVER_PROVISIONED, OPTIMIZED, or IDLE
+- `recommendationOptions`: Specific instance types with projected performance
+- Accounts for CPU, memory, network, and disk (not just CPU)
+
+**Use CO finding directly instead of manual threshold checks when available.**
+
+### Step 3: Idle Detection (EC2-026)
+
+```bash
+aws compute-optimizer get-ec2-instance-recommendations \
+  --filters name=Finding,values=Idle
+```
+
+This is more accurate than manual idle detection because it uses ML trained on usage patterns.
+
+### Fallback (CO Not Enabled)
+
+If Compute Optimizer is not active, use the manual multi-signal idle detection below.
+
+---
+
+## Memory Metric Graceful Degradation (EC2-027)
+
+**Check if CloudWatch Agent memory metrics exist.** If available, use them to improve idle detection accuracy. If not, proceed without penalizing confidence.
+
+### Check Availability
+
+```bash
+aws cloudwatch list-metrics --namespace CWAgent --metric-name mem_used_percent \
+  --dimensions Name=InstanceId,Value={instance_id}
+```
+
+### If Available
+
+Add memory as a signal in idle detection:
+
+| Signal | Metric | Threshold | Weight |
+|--------|--------|-----------|--------|
+| Memory | mem_used_percent | < 10% | 0.15 |
+
+Redistribute weights: CPU 0.35, Network In 0.10, Network Out 0.10, Connections 0.15, Disk I/O 0.10, Memory 0.15
+
+**CRITICAL**: An instance at <5% CPU but >70% memory is likely a cache server — do NOT flag as idle.
+
+### If Not Available
+
+- Note: `"memory_data": "unavailable - CloudWatch Agent not installed"`
+- Do NOT reduce confidence due to missing memory data
+- Proceed with standard 5-signal detection
+
+---
+
+## Data Transfer Cost Analysis (NET-016, NET-017)
+
+**Most tools miss data transfer costs.** Use USAGE_TYPE grouping to surface hidden charges.
+
+### Query Data Transfer Breakdown
+
+```bash
+aws ce get-cost-and-usage \
+  --time-period Start={30_days_ago},End={now} \
+  --granularity MONTHLY \
+  --metrics UnblendedCost \
+  --group-by Type=DIMENSION,Key=USAGE_TYPE \
+  --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Elastic Compute Cloud - Compute"]}}'
+```
+
+### Key Usage Types to Flag
+
+| Usage Type | What It Is | Cost |
+|------------|-----------|------|
+| `DataTransfer-Regional-Bytes` | Cross-AZ traffic | $0.01/GB each direction |
+| `NatGateway-Bytes` | NAT data processing | $0.045/GB |
+| `DataTransfer-Out-Bytes` | Internet egress | $0.09/GB first 10TB |
+| `DataTransfer-In-Bytes` | Internet ingress | Free |
+
+### Findings Format
+
+```json
+{
+  "check_id": "NET-017",
+  "title": "High Data Transfer Costs",
+  "monthly_savings": 45.00,
+  "details": {
+    "cross_az_cost": 23.50,
+    "nat_processing_cost": 89.00,
+    "internet_egress_cost": 156.00,
+    "total_data_transfer_cost": 268.50,
+    "recommendation": "VPC endpoints for S3/DynamoDB would eliminate $89/mo in NAT processing"
+  }
+}
+```
+
+---
+
+## Reservation Purchase Recommendations (RI-007, SP-005)
+
+**Query AWS for purchase recommendations instead of just checking coverage gaps.**
+
+### RI Purchase Recommendation
+
+```bash
+aws ce get-reservation-purchase-recommendation \
+  --service "Amazon Elastic Compute Cloud - Compute" \
+  --term-in-years ONE_YEAR \
+  --payment-option PARTIAL_UPFRONT \
+  --lookback-period-in-days SIXTY_DAYS
+```
+
+### Savings Plan Purchase Recommendation
+
+```bash
+aws ce get-savings-plans-purchase-recommendation \
+  --savings-plans-type COMPUTE_SP \
+  --term-in-years ONE_YEAR \
+  --payment-option PARTIAL_UPFRONT \
+  --lookback-period-in-days SIXTY_DAYS
+```
+
+These return specific amounts and estimated savings. Include in findings as actionable recommendations.
 
 ---
 

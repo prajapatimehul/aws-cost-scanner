@@ -167,12 +167,18 @@ def analyze_finding(finding: dict, profile: str) -> dict:
             adjustments_applied.append(("resource_new_14d", ADJUSTMENTS["resource_new_14d"]))
             notes.append(f"Resource {age_days} days old - limited data")
 
-    # 4. ASG membership (for EC2)
-    if check_id.startswith("EC2-001") and resource_id.startswith("i-"):
+    # 4. ASG membership (for EC2 idle checks)
+    if check_id in ("EC2-001", "EC2-026") and resource_id.startswith("i-"):
         if check_asg_membership(resource_id, profile):
             confidence += ADJUSTMENTS["part_of_asg"]
             adjustments_applied.append(("part_of_asg", ADJUSTMENTS["part_of_asg"]))
             notes.append("Part of Auto Scaling Group - likely false positive")
+
+    # 4b. Compute Optimizer findings get +15 confidence (ML-validated)
+    if check_id in ("EC2-024", "EC2-026"):
+        confidence += 15
+        adjustments_applied.append(("compute_optimizer_ml", +15))
+        notes.append("ML-validated by AWS Compute Optimizer")
 
     # 5. Data sufficiency check
     days_monitored = details.get("days_monitored") or details.get("evaluation_period_days")

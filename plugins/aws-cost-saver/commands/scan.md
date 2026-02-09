@@ -75,11 +75,23 @@ Use `AskUserQuestion`:
 }
 ```
 
-## Step 4: Get Actual Monthly Spend
+## Step 3.5: Check Compute Optimizer Enrollment
+
+```bash
+aws compute-optimizer get-enrollment-status --profile {profile}
+```
+
+If status is `Inactive`, inform the user:
+> "AWS Compute Optimizer is not enabled. It provides free ML-powered rightsizing and idle detection. Enable with: `aws compute-optimizer update-enrollment-status --status Active`"
+
+Store `compute_optimizer_active: true/false` in metadata. Pass to domain agents.
+
+## Step 4: Get Actual Monthly Spend + Data Transfer Breakdown
 
 **CRITICAL:** Query AWS Cost Explorer for real billing data.
 
 ```bash
+# Service-level spend
 aws ce get-cost-and-usage \
   --profile {profile} \
   --time-period Start={LAST_MONTH_START},End={LAST_MONTH_END} \
@@ -88,7 +100,20 @@ aws ce get-cost-and-usage \
   --group-by Type=DIMENSION,Key=SERVICE
 ```
 
-Store `actual_monthly_spend` in metadata.
+**NEW: Also query USAGE_TYPE for data transfer costs (same API, $0.01 extra):**
+
+```bash
+# Data transfer breakdown (surfaces hidden costs)
+aws ce get-cost-and-usage \
+  --profile {profile} \
+  --time-period Start={LAST_MONTH_START},End={LAST_MONTH_END} \
+  --granularity MONTHLY \
+  --metrics UnblendedCost \
+  --group-by Type=DIMENSION,Key=USAGE_TYPE \
+  --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Elastic Compute Cloud - Compute"]}}'
+```
+
+Store both `actual_monthly_spend` and `data_transfer_breakdown` in metadata.
 
 **Note:** If no `--profile` is provided, AWS CLI uses default credentials (env vars or IAM role).
 
@@ -98,13 +123,13 @@ Launch 11 `aws-cost-saver:aws-cost-saver` subagents **in parallel**:
 
 | Agent | Domain | Checks |
 |-------|--------|--------|
-| 1 | compute | EC2, EBS, AMIs, snapshots, EIPs |
-| 2 | storage | S3, EFS, CloudWatch Logs, CloudTrail |
+| 1 | compute | EC2, EBS, AMIs, snapshots, EIPs, Compute Optimizer |
+| 2 | storage | S3, EFS, CloudWatch Logs, CloudTrail, Secrets Manager |
 | 3 | database | RDS, DynamoDB, ElastiCache |
-| 4 | networking | NAT, ELB, VPC endpoints, data transfer |
+| 4 | networking | NAT, ELB, VPC endpoints, data transfer, Route 53 |
 | 5 | serverless | Lambda, API Gateway, SQS, Step Functions |
-| 6 | reservations | RI coverage, Savings Plans |
-| 7 | containers | ECS, EKS, Fargate |
+| 6 | reservations | RI coverage, Savings Plans, purchase recommendations |
+| 7 | containers | ECS, EKS, Fargate, ECR |
 | 8 | advanced_databases | Aurora, DocumentDB, Neptune, Redshift |
 | 9 | analytics | SageMaker, EMR, OpenSearch, QuickSight |
 | 10 | data_pipelines | Kinesis, MSK, Glue, EventBridge |
@@ -114,6 +139,8 @@ Pass to each:
 - `region`: Active region(s)
 - `compliance`: User's selection
 - `profile`: AWS profile name
+- `compute_optimizer_active`: Whether CO is enrolled (for compute domain)
+- `data_transfer_breakdown`: USAGE_TYPE costs (for networking domain)
 
 ## Step 6: Merge & Quick Review
 
@@ -175,6 +202,12 @@ Each finding type has a SPECIFIC formula:
 | Idle SageMaker Endpoint | `hourly_rate × 730` |
 | Over-provisioned Kinesis | `shards × $0.015/hr × 730` |
 | Idle MSK Cluster | `broker_cost × brokers` |
+| NAT Data Processing | `gb_processed × $0.045` |
+| Cross-AZ Transfer | `gb_transferred × $0.02` (both directions) |
+| Unused Secrets | `count × $0.40` |
+| Unused Route 53 Zone | `count × $0.50` |
+| RI Purchase Savings | From `ce get-reservation-purchase-recommendation` |
+| SP Purchase Savings | From `ce get-savings-plans-purchase-recommendation` |
 
 ### 6.5.4: Flag & Correct Invalid Findings
 

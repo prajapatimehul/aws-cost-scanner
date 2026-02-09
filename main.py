@@ -8,7 +8,7 @@ Usage:
     python main.py scan                    # Scan account using AWS MCP
     python main.py scan --from-cur <file>  # Analyze from CUR file
     python main.py report                  # Generate report from last scan
-    python main.py checks                  # List all 97 checks
+    python main.py checks                  # List all 173 checks
 """
 
 import argparse
@@ -33,7 +33,9 @@ def get_all_checks() -> list[dict]:
     all_checks = []
 
     for domain in ['compute', 'storage', 'database', 'networking',
-                   'serverless', 'reservations']:
+                   'serverless', 'reservations', 'containers',
+                   'advanced_databases', 'analytics', 'data_pipelines',
+                   'storage_advanced']:
         if domain in checks_data:
             for check in checks_data[domain]:
                 check['domain'] = domain
@@ -181,7 +183,7 @@ def cmd_init(args):
 
 def main():
     parser = argparse.ArgumentParser(
-        description='AWS Cost Optimization - 97 checks across 6 domains',
+        description='AWS Cost Optimization - 163 checks across 11 domains',
         formatter_class=argparse.RawDescriptionHelpFormatter
     )
 
@@ -228,7 +230,7 @@ def main():
         parser.print_help()
         print("\n" + "=" * 50)
         print("Quick Start:")
-        print("  python main.py checks          # List all 97 checks")
+        print("  python main.py checks          # List all 163 checks")
         print("  python main.py check EC2-001   # View specific check")
         print("  python main.py scan-info       # Show AWS CLI commands needed")
         print("\nFor scanning, use Claude Code with AWS MCP to run the checks.")

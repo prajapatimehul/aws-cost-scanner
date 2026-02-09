@@ -1,9 +1,13 @@
 {
   "name": "aws-cost-saver",
-  "version": "1.0.0",
-  "description": "97 automated AWS cost optimization checks across 6 domains with parallel scanning and confidence-based filtering",
+  "version": "2.0.0",
+  "description": "173 AWS cost checks with Compute Optimizer ML integration, data transfer analysis, and reservation purchase recommendations",
   "author": {
     "name": "Mehul Prajapati",
-    "email": "mehul@example.com"
-  }
+    "url": "https://github.com/prajapatimehul"
+  },
+  "homepage": "https://github.com/prajapatimehul/claude-aws-cost-saver",
+  "repository": "https://github.com/prajapatimehul/claude-aws-cost-saver",
+  "license": "MIT",
+  "keywords": ["aws", "cost-optimization", "cloud", "finops", "savings", "ec2", "rds", "s3", "lambda", "eks"]
 }

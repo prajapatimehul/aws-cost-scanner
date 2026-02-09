@@ -2,7 +2,9 @@
 
 ## Overview
 
-97 automated cost optimization checks across 6 domains.
+173 automated cost optimization checks across 11 domains.
+Integrates **AWS Compute Optimizer** (free ML-powered rightsizing/idle detection),
+**Data Transfer cost analysis** (USAGE_TYPE breakdown), and **Reservation Purchase Recommendations**.
 Designed for use with **Claude Code + AWS MCP** for direct account scanning.
 Output: **Markdown only** (no Excel/PDF/HTML).
 
@@ -104,17 +106,17 @@ Then generate markdown:
 python main.py report --findings findings.json
 ```
 
-## Check Summary (163 Total)
+## Check Summary (173 Total)
 
 | Domain | Checks | Key Checks |
 |--------|--------|------------|
-| **Compute** | 25 | EC2 idle, over-provisioned, GP2→GP3, Graviton |
-| **Storage** | 22 | S3 lifecycle, EBS unattached, snapshots, CloudWatch Logs |
+| **Compute** | 27 | EC2 idle, Compute Optimizer ML rightsizing/idle, memory check, GP2→GP3, Graviton |
+| **Storage** | 24 | S3 lifecycle, EBS unattached, CloudWatch Logs, Secrets Manager, CloudTrail data events |
 | **Database** | 15 | RDS idle, over-provisioned, RI coverage |
-| **Networking** | 15 | Unused EIPs, NAT optimization, VPC endpoints |
+| **Networking** | 18 | Unused EIPs, NAT data processing, data transfer breakdown, VPC endpoints, Route 53 |
 | **Serverless** | 10 | Lambda memory, unused functions, ARM64 |
-| **Reservations** | 10 | RI coverage gaps, Savings Plans |
-| **Containers** | 15 | ECS/EKS idle, Fargate optimization, Spot opportunity |
+| **Reservations** | 12 | RI/SP coverage gaps, RI purchase recommendations, SP purchase recommendations |
+| **Containers** | 16 | ECS/EKS idle, Fargate optimization, Spot opportunity, ECR lifecycle |
 | **Advanced DBs** | 18 | Aurora, DocumentDB, Neptune, Redshift optimization |
 | **Analytics** | 15 | SageMaker, EMR, OpenSearch, QuickSight |
 | **Data Pipelines** | 12 | Kinesis, MSK, Glue, EventBridge |
@@ -144,7 +146,7 @@ claude-aws-cost-saver/
 │               ├── PRICING_REFERENCE.md
 │               └── scripts/validate_pricing.py
 ├── checks/
-│   └── all_checks.yaml          # All 97 check definitions
+│   └── all_checks.yaml          # All 163 check definitions
 ├── src/
 │   ├── outputs/markdown_report.py
 │   └── parsers/cur_parser.py
@@ -192,16 +194,16 @@ This enables:
 
 ### Parallel Domain Scanning
 
-Scan all 6 domains simultaneously for faster analysis:
+Scan all 11 domains simultaneously for faster analysis:
 
 ```
 Scan the AWS account in parallel using the aws-cost-saver:aws-cost-saver agent:
-- Launch 6 agents, one for each domain
-- Domains: compute, storage, database, networking, serverless, reservations
+- Launch 11 agents, one for each domain
+- Domains: compute, storage, database, networking, serverless, reservations, containers, advanced_databases, analytics, data_pipelines, storage_advanced
 - Region: us-east-1
 ```
 
-Claude Code will invoke the Task tool 6 times in parallel:
+Claude Code will invoke the Task tool 11 times in parallel:
 ```python
 # Internal invocation (automatic)
 Task(
@@ -222,13 +224,18 @@ Use the aws-cost-saver agent to scan just the database domain
 
 You can also explicitly request parallel scanning:
 ```
-Run 6 aws-cost-saver agents in parallel:
-1. Compute domain
-2. Storage domain
+Run 11 aws-cost-saver agents in parallel:
+1. Compute domain (includes Compute Optimizer ML checks)
+2. Storage domain (includes Secrets Manager, CloudTrail data events)
 3. Database domain
-4. Networking domain
+4. Networking domain (includes data transfer analysis, Route 53)
 5. Serverless domain
-6. Reservations domain
+6. Reservations domain (includes purchase recommendations)
+7. Containers domain (includes ECR lifecycle)
+8. Advanced Databases domain
+9. Analytics domain
+10. Data Pipelines domain
+11. Storage Advanced domain
 
 Region: us-east-1
 After all complete, merge findings into findings.json
@@ -244,7 +251,10 @@ aws ec2 describe-addresses
 aws ec2 describe-snapshots --owner-ids self
 aws ec2 describe-images --owners self
 aws autoscaling describe-auto-scaling-groups
+aws compute-optimizer get-enrollment-status
 aws compute-optimizer get-ec2-instance-recommendations
+aws compute-optimizer get-ec2-instance-recommendations --filters name=Finding,values=Idle
+aws cloudwatch list-metrics --namespace CWAgent --metric-name mem_used_percent --dimensions Name=InstanceId,Value={id}
 ```
 
 ### Storage
@@ -254,6 +264,9 @@ aws s3api get-bucket-lifecycle-configuration --bucket {name}
 aws efs describe-file-systems
 aws logs describe-log-groups
 aws cloudtrail describe-trails
+aws cloudtrail get-event-selectors --trail-name {trail_name}
+aws secretsmanager list-secrets
+aws secretsmanager describe-secret --secret-id {secret_id}
 ```
 
 ### Database
@@ -273,6 +286,9 @@ aws elbv2 describe-load-balancers
 aws elbv2 describe-target-groups
 aws ec2 describe-vpc-endpoints
 aws ec2 describe-vpcs
+aws route53 list-hosted-zones
+aws route53 list-resource-record-sets --hosted-zone-id {zone_id}
+aws ce get-cost-and-usage --time-period Start={30d_ago},End={now} --granularity MONTHLY --metrics UnblendedCost --group-by Type=DIMENSION,Key=USAGE_TYPE --filter '{"Dimensions":{"Key":"SERVICE","Values":["Amazon Elastic Compute Cloud - Compute"]}}'
 ```
 
 ### Serverless
@@ -291,6 +307,8 @@ aws ce get-reservation-utilization --time-period Start={30d_ago},End={now}
 aws ce get-savings-plans-coverage --time-period Start={30d_ago},End={now}
 aws savingsplans describe-savings-plans
 aws ec2 describe-reserved-instances
+aws ce get-reservation-purchase-recommendation --service "Amazon Elastic Compute Cloud - Compute" --term-in-years ONE_YEAR --payment-option PARTIAL_UPFRONT --lookback-period-in-days SIXTY_DAYS
+aws ce get-savings-plans-purchase-recommendation --savings-plans-type COMPUTE_SP --term-in-years ONE_YEAR --payment-option PARTIAL_UPFRONT --lookback-period-in-days SIXTY_DAYS
 ```
 
 ### Containers
@@ -303,6 +321,9 @@ aws ecs describe-task-definition --task-definition {task_def}
 aws eks list-clusters
 aws eks list-nodegroups --cluster-name {cluster}
 aws eks describe-nodegroup --cluster-name {cluster} --nodegroup-name {nodegroup}
+aws ecr describe-repositories
+aws ecr get-lifecycle-policy --repository-name {repo_name}
+aws ecr describe-images --repository-name {repo_name} --filter tagStatus=UNTAGGED
 ```
 
 ### Advanced Databases
@@ -419,17 +440,18 @@ Supported formats: Parquet (preferred), CSV
 | **Low** | Consider when convenient | Minor optimizations |
 | **Info** | Awareness only | Compliance, tagging |
 
-## Scan Workflow (8 Steps)
+## Scan Workflow (9 Steps)
 
 ```
 1. Discover account & regions
 2. Ask compliance (HIPAA, SOC2, PCI-DSS)
-3. Get actual monthly spend from Cost Explorer
-4. Parallel domain scan (6 agents)
-5. Quick review (2 checks: resource age, environment)
-6. MANDATORY: Price validation (sanity check all findings)
-7. Generate report
-8. Show top findings & ask what to implement
+3. Check Compute Optimizer enrollment (free ML rightsizing)
+4. Get actual monthly spend + data transfer breakdown from Cost Explorer
+5. Parallel domain scan (11 agents)
+6. Quick review (2 checks: resource age, environment)
+7. MANDATORY: Price validation (sanity check all findings)
+8. Generate report
+9. Show top findings & ask what to implement
 ```
 
 ### Quick Review (Inline)
