@@ -1,8 +1,8 @@
 {
   "mcpServers": {
     "awslabs-aws-api": {
-      "command": "uvx",
-      "args": ["awslabs.aws-api-mcp-server@latest"],
+      "command": "${CLAUDE_PLUGIN_ROOT}/scripts/start-mcp.sh",
+      "args": [],
       "env": {
         "FASTMCP_LOG_LEVEL": "ERROR"
       }
