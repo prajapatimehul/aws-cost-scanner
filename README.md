@@ -1,4 +1,4 @@
-# AWS Cost Scanner
+# AWS Cost Saver
 
 Find what's wasting money in your AWS account.
 
@@ -12,15 +12,15 @@ Claude: Found 8 issues. Potential savings: $340/month
 In Claude Code:
 
 ```
-/plugin → Marketplaces → Add Marketplace → git@github.com:prajapatimehul/aws-cost-scanner.git
+/plugin → Marketplaces → Add Marketplace → git@github.com:prajapatimehul/aws-cost-saver.git
 ```
 
-Select `aws-cost-scanner` and install.
+Select `aws-cost-saver` and install.
 
 ## Quick Start
 
 ```bash
-/aws-cost-scanner:scan
+/aws-cost-saver:scan
 ```
 
 Or just ask: `Scan my AWS account for cost savings`
@@ -41,9 +41,9 @@ Or just ask: `Scan my AWS account for cost savings`
 
 | Command | Description |
 |---------|-------------|
-| `/aws-cost-scanner:scan` | Full cost optimization scan |
-| `/aws-cost-scanner:reviewing-findings` | Review with confidence scoring |
-| `/aws-cost-scanner:validating-aws-pricing` | Validate against AWS Pricing API |
+| `/aws-cost-saver:scan` | Full cost optimization scan |
+| `/aws-cost-saver:reviewing-findings` | Review with confidence scoring |
+| `/aws-cost-saver:validating-aws-pricing` | Validate against AWS Pricing API |
 
 ---
 

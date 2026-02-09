@@ -1,5 +1,5 @@
 {
-  "name": "aws-cost-scanner-marketplace",
+  "name": "aws-cost-saver-marketplace",
   "owner": {
     "name": "Mehul Prajapati",
     "email": "mehul@example.com"
@@ -10,13 +10,13 @@
   },
   "plugins": [
     {
-      "name": "aws-cost-scanner",
+      "name": "aws-cost-saver",
       "description": "97 automated AWS cost optimization checks across 6 domains with parallel scanning and confidence-based filtering",
       "version": "1.0.0",
       "author": {
         "name": "Mehul Prajapati"
       },
-      "source": "./plugins/aws-cost-scanner",
+      "source": "./plugins/aws-cost-saver",
       "category": "infrastructure",
       "tags": ["aws", "cost-optimization", "cloud", "finops"],
       "keywords": ["aws", "cost", "optimization", "cloud", "finops", "savings"]

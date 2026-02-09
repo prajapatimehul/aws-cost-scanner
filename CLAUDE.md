@@ -123,15 +123,15 @@ python main.py report --findings findings.json
 ## Project Structure
 
 ```
-aws-cost-optimizer/
+claude-aws-cost-saver/
 ├── .claude-plugin/
 │   └── marketplace.json         # Plugin marketplace definition
 ├── plugins/
-│   └── aws-cost-scanner/        # The plugin
+│   └── aws-cost-saver/        # The plugin
 │       ├── plugin.json          # Plugin metadata
 │       ├── .mcp.json            # MCP server configuration (AWS API)
 │       ├── agents/
-│       │   └── aws-cost-scanner.md
+│       │   └── aws-cost-saver.md
 │       ├── commands/
 │       │   └── scan.md
 │       └── skills/
@@ -155,9 +155,9 @@ aws-cost-optimizer/
 └── resources.json               # Resource inventory (generated)
 ```
 
-## Custom Subagent: aws-cost-scanner
+## Custom Subagent: aws-cost-saver
 
-A specialized subagent for scanning AWS accounts. Located at `plugins/aws-cost-scanner/agents/aws-cost-scanner.md`.
+A specialized subagent for scanning AWS accounts. Located at `plugins/aws-cost-saver/agents/aws-cost-saver.md`.
 
 ### Features
 - Reads check definitions from `checks/all_checks.yaml`
@@ -195,7 +195,7 @@ This enables:
 Scan all 6 domains simultaneously for faster analysis:
 
 ```
-Scan the AWS account in parallel using the aws-cost-scanner:aws-cost-scanner agent:
+Scan the AWS account in parallel using the aws-cost-saver:aws-cost-saver agent:
 - Launch 6 agents, one for each domain
 - Domains: compute, storage, database, networking, serverless, reservations
 - Region: us-east-1
@@ -205,7 +205,7 @@ Claude Code will invoke the Task tool 6 times in parallel:
 ```python
 # Internal invocation (automatic)
 Task(
-    subagent_type="aws-cost-scanner:aws-cost-scanner",
+    subagent_type="aws-cost-saver:aws-cost-saver",
     prompt="Scan the compute domain in us-east-1. Read checks from checks/all_checks.yaml...",
 )
 # ... repeated for each domain
@@ -215,14 +215,14 @@ Task(
 
 For focused analysis:
 ```
-Use the aws-cost-scanner agent to scan just the database domain
+Use the aws-cost-saver agent to scan just the database domain
 ```
 
 ### Manual Invocation
 
 You can also explicitly request parallel scanning:
 ```
-Run 6 aws-cost-scanner agents in parallel:
+Run 6 aws-cost-saver agents in parallel:
 1. Compute domain
 2. Storage domain
 3. Database domain
@@ -445,7 +445,7 @@ Mark findings:
 
 ### Safety Checks (Applied by Subagents)
 
-Each `aws-cost-scanner` subagent applies these checks internally before flagging resources:
+Each `aws-cost-saver` subagent applies these checks internally before flagging resources:
 
 1. **Multi-Signal Detection** - idle_score >= 0.60 required
 2. **Batch Detection** - Skip if avg < 15% AND max > 60% AND ratio >= 4
@@ -453,7 +453,7 @@ Each `aws-cost-scanner` subagent applies these checks internally before flagging
 4. **Cost-Tiered Confidence** - HIGH cost (>$100) needs 7+ days and 85% confidence
 5. **Tag Exclusions** - Honor SkipCostOpt=true tag
 
-See `agents/aws-cost-scanner.md` for implementation details.
+See `agents/aws-cost-saver.md` for implementation details.
 
 ### MANDATORY: Price Validation
 
@@ -490,6 +490,6 @@ See `agents/aws-cost-scanner.md` for implementation details.
 
 For thorough analysis, run the review script:
 ```bash
-python plugins/aws-cost-scanner/skills/reviewing-findings/scripts/review_findings.py \
+python plugins/aws-cost-saver/skills/reviewing-findings/scripts/review_findings.py \
   reports/findings_{profile}.json --profile {profile}
 ```

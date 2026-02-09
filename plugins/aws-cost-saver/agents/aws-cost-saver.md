@@ -1,5 +1,5 @@
 ---
-name: aws-cost-scanner
+name: aws-cost-saver
 description: AWS cost optimization scanner. Analyzes AWS resources for cost savings. Use when scanning AWS accounts or analyzing domains (compute, storage, database, networking, serverless, reservations, containers, advanced_databases, analytics, data_pipelines, storage_advanced).
 tools: Read, Write, Grep, Glob, mcp__awslabs-aws-api__call_aws
 model: inherit

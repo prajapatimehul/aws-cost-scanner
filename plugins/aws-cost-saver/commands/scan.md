@@ -94,7 +94,7 @@ Store `actual_monthly_spend` in metadata.
 
 ## Step 5: Parallel Domain Scan
 
-Launch 11 `aws-cost-scanner:aws-cost-scanner` subagents **in parallel**:
+Launch 11 `aws-cost-saver:aws-cost-saver` subagents **in parallel**:
 
 | Agent | Domain | Checks |
 |-------|--------|--------|
