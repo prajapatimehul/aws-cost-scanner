@@ -19,6 +19,30 @@ Detailed criteria for reviewing each finding type.
 | Recent configuration change | -20 |
 | Consistent pattern (14+ days) | +20 |
 
+### Anti-Hallucination Adjustments (MANDATORY - check first)
+
+| Factor | Action |
+|--------|--------|
+| `pricing_source` missing from details | **REJECT** → set monthly_savings=0, pricing_unknown=true |
+| `calculation` missing from details | **REJECT** → set monthly_savings=0, pricing_unknown=true |
+| pricing_source="pricing_unknown" but savings > 0 | **REJECT** → set monthly_savings=0 |
+| Missing CloudWatch data counted as zero | **REJECT** → recalculate idle score without that signal |
+| Downsize target crosses instance family | **REJECT** → set monthly_savings=0, needs manual review |
+| Windows instance priced as Linux | **REJECT** → re-query Pricing API with operatingSystem=Windows |
+| Multi-AZ RDS priced as Single-AZ | **REJECT** → re-query Pricing API with deploymentOption=Multi-AZ |
+| EBS savings missing IOPS/throughput costs | **REJECT** → recalculate with all 3 components |
+| monthly_savings > service spend (3+ resources) | **REJECT** → cap at 90% of service spend |
+| monthly_savings > 110% service spend (any count) | **REJECT** → recalculate, formula is wrong |
+| Migration savings using "up to" percentages | **REJECT** → use fixed conservative rates only |
+| Spot instance priced at On-Demand rate | **REJECT** → use On-Demand × 0.3 for Spot |
+| RI/SP-covered resource at On-Demand price | **FLAG** → reduce confidence by -20%, note coverage |
+| IaC-managed resource recommended for deletion | **FLAG** → change to "Review with IaC team", -10% confidence |
+| Burstable instance (t2/t3/t4g) without credit check | **FLAG** → reduce confidence by -10% |
+| Downsize target doesn't exist (already at minimum) | **REJECT** → set monthly_savings=0 |
+| `pricing_corrected: true` already in details | **SKIP** → already validated, no further adjustment |
+
+**Valid `pricing_source` values:** `aws_pricing_api`, `verified_table`, `aws_cost_explorer`, `pricing_unknown`
+
 ### Starting Confidence
 
 Each finding starts with its original confidence from the scan. Adjustments are applied based on review findings.

@@ -474,10 +474,48 @@ Each `aws-cost-saver` subagent applies these checks internally before flagging r
 3. **Dependency Checks** - Skip ASG members, NAT with routes, ELB with targets
 4. **Cost-Tiered Confidence** - HIGH cost (>$100) needs 7+ days and 85% confidence
 5. **Tag Exclusions** - Honor SkipCostOpt=true tag
+6. **Zero Hallucination Pricing** - API first → verified table → $0 with pricing_unknown
 
 See `agents/aws-cost-saver.md` for implementation details.
 
-### MANDATORY: Price Validation
+### MANDATORY: Zero Hallucination Pricing
+
+**Every finding's `monthly_savings` must come from a verifiable source. NEVER guess.**
+
+The subagent uses a strict 3-step pricing resolution:
+
+```
+Step 1: Query AWS Pricing API (aws pricing get-products) for the EXACT SKU
+        → pricing_source: "aws_pricing_api"
+Step 2: Fallback to verified table (us-east-1 only, exact match only)
+        → pricing_source: "verified_table"
+Step 3: Set monthly_savings=0, pricing_unknown=true
+        → NEVER estimate, interpolate, or guess
+```
+
+**Anti-Hallucination Rules (enforced by subagent):**
+
+| Rule | What It Prevents |
+|------|-----------------|
+| API first, table second, zero third | Guessing prices for unknown instance types |
+| Missing CloudWatch data ≠ zero | False "idle" findings from missing metrics |
+| Same family, one size down only | Creative downsize recommendations (m5→t3) |
+| Fixed migration rates only | "Up to 40%" becoming fabricated savings |
+| No data transfer composition guessing | "60% is probably S3 traffic" fabrication |
+| Correct OS (Windows ≠ Linux) | 2× pricing errors on Windows instances |
+| Correct deployment (Multi-AZ ≠ Single-AZ) | 2× pricing errors on Multi-AZ RDS |
+| All EBS components (storage + IOPS + throughput) | io2 priced at $12 instead of $1,052 |
+| Savings ≤ service spend (context-aware) | Finding saving more than the service costs |
+| $1 minimum floor | Noise findings cluttering the report |
+| RI/SP coverage check | On-Demand price used for RI-covered resources |
+| Spot instance detection | On-Demand price used for Spot instances |
+| Burstable credit analysis | t2/t3 flagged idle without credit check |
+| IaC-managed resource detection | Deleting CFN/TF resource triggers recreation |
+| Downsize floor check | Recommending nonexistent smaller size |
+| Pricing API error handling | Graceful retry then fallback |
+| Cost Explorer availability | All validations skip if CE unavailable |
+
+### MANDATORY: Price Validation (Post-Scan)
 
 **CRITICAL** - Run BEFORE generating the report:
 
@@ -488,8 +526,9 @@ See `agents/aws-cost-saver.md` for implementation details.
    | Finding | Formula |
    |---------|---------|
    | CW Logs Retention | `stored_gb × $0.03` (storage only, NOT $0.50 ingestion) |
-   | Unattached EBS | `size_gb × price_per_gb` |
-   | Idle EC2 | `hourly_rate × 730` |
+   | Unattached EBS | `(size_gb × price_per_gb) + IOPS cost + throughput cost` |
+   | Idle EC2 | `hourly_rate × 730` (from Pricing API, correct OS) |
+   | Idle RDS | `hourly_rate × 730` (correct engine + deployment option) |
 
 3. **For findings > $100:** Query usage-type breakdown:
    ```bash
@@ -498,15 +537,16 @@ See `agents/aws-cost-saver.md` for implementation details.
      --group-by Type=DIMENSION,Key=USAGE_TYPE
    ```
 
-4. **Correct & Flag:** If a finding fails validation:
+4. **Verify pricing_source:** Every finding must have one of:
+   - `aws_pricing_api` — price came from Pricing API query
+   - `verified_table` — price came from hardcoded table (us-east-1 only)
+   - `aws_cost_explorer` — price came from Cost Explorer (RI/SP recommendations)
+   - `pricing_unknown` — price could not be determined, monthly_savings=0
+
+5. **Correct & Flag:** If a finding fails validation:
    - Recalculate with correct formula
    - Add `pricing_corrected: true` to details
    - Document the correction reason
-
-**Common Mistakes to Avoid:**
-- CloudWatch Logs: Using $0.50/GB (ingestion) instead of $0.03/GB (storage)
-- Not checking if savings exceed actual service spend
-- Missing cost components (EBS has storage + IOPS + throughput)
 
 ### Optional: Deep Review
 

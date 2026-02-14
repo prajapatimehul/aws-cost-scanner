@@ -23,7 +23,7 @@ Common errors this skill catches:
 
 ## Purpose
 
-This skill validates pricing for significant findings using live AWS Pricing API. Smaller findings use fallback estimates to avoid unnecessary API calls.
+This skill validates pricing for ALL findings using the Zero Hallucination Pricing System. Every finding must have a verifiable `pricing_source`. Findings without a pricing source or with fabricated prices are rejected (set to monthly_savings=0 with pricing_unknown=true).
 
 ## Quick Start
 
@@ -136,13 +136,23 @@ The script updates `findings.json` in place:
 ```
 - [ ] Load findings.json
 - [ ] Get actual billing from Cost Explorer (by service AND usage type)
+- [ ] ANTI-HALLUCINATION CHECKS (run first):
+  - [ ] Every finding has details.pricing_source (reject if missing)
+  - [ ] Every finding with savings > 0 has details.calculation (reject if missing)
+  - [ ] No findings have savings > 0 with pricing_source="pricing_unknown" (reject if found)
+  - [ ] No idle findings count missing metrics as zero activity (reject if found)
+  - [ ] Downsize targets are same-family-one-size-down or from Compute Optimizer (reject if not)
 - [ ] For EACH finding:
   - [ ] Verify formula matches finding type
   - [ ] Check savings <= service spend (sanity check)
-  - [ ] Query AWS Pricing API if > $100
+  - [ ] Query AWS Pricing API for ALL findings with pricing_source != "aws_pricing_api"
+  - [ ] Check OS matches (Windows vs Linux) for EC2 findings
+  - [ ] Check deployment option matches (Multi-AZ vs Single-AZ) for RDS findings
+  - [ ] Check all EBS components (storage + IOPS + throughput) for EBS findings
   - [ ] Recalculate if errors found
   - [ ] Add calculation breakdown to details
 - [ ] Flag any corrected findings with pricing_corrected: true
+- [ ] Set any unfixable findings to monthly_savings=0 with pricing_unknown=true
 - [ ] Recalculate total savings in metadata
 - [ ] Save corrected findings.json
 - [ ] Regenerate report with accurate prices

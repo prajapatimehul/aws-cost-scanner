@@ -142,11 +142,42 @@ Pass to each:
 - `compute_optimizer_active`: Whether CO is enrolled (for compute domain)
 - `data_transfer_breakdown`: USAGE_TYPE costs (for networking domain)
 
-## Step 6: Merge & Quick Review
+## Step 6: Merge, Anti-Hallucination Check & Quick Review
 
 Combine all 11 outputs into `reports/findings_{profile}.json`.
 
-**Quick Review (inline - no scripts):**
+### 6.0: Anti-Hallucination Verification (MANDATORY)
+
+The subagent SHOULD apply these rules internally. This step is a **safety net** to catch any violations that slipped through. Verify EVERY finding:
+
+**Check 1: pricing_source exists**
+Every finding MUST have `details.pricing_source` set to one of:
+- `aws_pricing_api` — price from Pricing API
+- `verified_table` — price from hardcoded table (us-east-1 only)
+- `aws_cost_explorer` — price from Cost Explorer (RI/SP)
+- `pricing_unknown` — price not found, monthly_savings MUST be 0
+
+If `pricing_source` is missing → **REJECT**, set monthly_savings=0, add pricing_unknown=true.
+
+**Check 2: calculation exists**
+Every finding with monthly_savings > 0 MUST have `details.calculation` with formula and numbers. If missing → **REJECT**.
+
+**Check 3: No fabricated prices**
+Any finding without `pricing_source` but with `monthly_savings > 0` → set to 0 with `pricing_unknown: true`.
+
+**Check 4: No missing-data-as-zero**
+Idle findings where any signal has `"status": "no_data"` but was counted as meeting threshold → recalculate idle score without that signal.
+
+**Check 5: Downsize targets are valid**
+Over-provisioned findings must use Compute Optimizer target OR one size down in same family. Otherwise → set monthly_savings=0.
+
+**Check 6: RI/SP and Spot coverage noted**
+Any EC2/RDS finding should have `covered_by_ri_or_sp` or `instance_lifecycle` in details if applicable. If missing for high-savings findings → flag for manual review.
+
+**Check 7: IaC-managed resources flagged**
+Findings recommending deletion of resources with `aws:cloudformation:stack-name` or terraform tags should have `managed_by_iac: true` and adjusted recommendation.
+
+### Quick Review (inline - no scripts):
 
 Apply 2 adjustments only:
 1. **Resource Age:** -30% confidence if created < 7 days ago
