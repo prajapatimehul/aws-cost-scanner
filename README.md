@@ -1,5 +1,11 @@
 # AWS Cost Saver
 
+[![GitHub stars](https://img.shields.io/github/stars/prajapatimehul/aws-cost-saver?style=social)](https://github.com/prajapatimehul/aws-cost-saver/stargazers)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
+[![GitHub release](https://img.shields.io/github/v/release/prajapatimehul/aws-cost-saver?include_prereleases)](https://github.com/prajapatimehul/aws-cost-saver/releases)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/prajapatimehul/aws-cost-saver/pulls)
+[![Claude Code](https://img.shields.io/badge/Claude%20Code-Plugin-5C4EE5)](https://code.claude.com)
+
 Find what's wasting money in your AWS account.
 
 ```
